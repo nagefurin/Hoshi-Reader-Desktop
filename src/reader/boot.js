@@ -46,7 +46,6 @@
   window.scanNonJapaneseText = params.get("snj") !== "0";
   const scanModifier = params.get("mod");
   const scanDelay = Number(params.get("sdl"));
-  const treatScannedWordAsPopup = params.get("tswp") === "1";
   const clickLookup = params.get("cl");
   const clickZone = Number(params.get("cz")) / 100;
   function clickEdge(x) {
@@ -398,114 +397,6 @@
   let lastMouse = null;
   let mouseButtons = 0;
   let scanTimer = 0;
-  let hoverWord = false;
-  let hoverWordRects = [];
-
-  function reportHoverWord(over) {
-    if (!treatScannedWordAsPopup || hoverWord === over) return;
-    hoverWord = over;
-    parent.postMessage({ hoshi: "hover-word", over }, "*");
-  }
-
-  function pointInHoverWord(x, y) {
-    return hoverWordRects.some((rect) =>
-      x >= rect.left - 2 &&
-      x <= rect.right + 2 &&
-      y >= rect.top - 2 &&
-      y <= rect.bottom + 2
-    );
-  }
-
-  function updateHoverWordTarget() {
-    hoverWordRects = window.hoshiSelection.getSelectionRects();
-  }
-
-  function clearHoverWordTarget() {
-    hoverWordRects = [];
-    reportHoverWord(false);
-  }
-  document.addEventListener(
-    "mousemove",
-    (e) => {
-      mouseButtons = e.buttons;
-      lastMouse = { x: e.clientX, y: e.clientY };
-      clearTimeout(scanTimer);
-      if (e.buttons) return;
-      if (treatScannedWordAsPopup) {
-        reportHoverWord(pointInHoverWord(e.clientX, e.clientY));
-      }
-      if (!modifierHeld(e)) {
-        if (!scanModifier) {
-          scanTimer = setTimeout(() => {
-            if (window.hoshiParagraph.animationFrame) return;
-            const selected = window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
-            if (treatScannedWordAsPopup) {
-              if (selected && window.hoshiSelection.selection) {
-                updateHoverWordTarget();
-                reportHoverWord(true);
-              } else {
-                clearHoverWordTarget();
-              }
-            }
-          }, scanDelay);
-        }
-        return;
-      }
-      if (window.hoshiParagraph.finishTextAnimation()) return;
-      const selected = window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
-      if (treatScannedWordAsPopup) {
-        if (selected && window.hoshiSelection.selection) {
-          updateHoverWordTarget();
-          reportHoverWord(true);
-        } else {
-          clearHoverWordTarget();
-        }
-      }
-    },
-    true,
-  );
-  document.addEventListener(
-    "keydown",
-    (e) => {
-      if (!isScanKey(e.key)) return;
-      scanKeyHeld = true;
-      if (e.repeat || !lastMouse || mouseButtons) return;
-      if (window.hoshiParagraph.finishTextAnimation()) return;
-      const selected = window.hoshiSelection.selectText(lastMouse.x, lastMouse.y, window.scanLength);
-      if (treatScannedWordAsPopup) {
-        if (selected && window.hoshiSelection.selection) {
-          updateHoverWordTarget();
-          reportHoverWord(true);
-        } else {
-          clearHoverWordTarget();
-        }
-      }
-    },
-    true,
-  );
-  document.addEventListener(
-    "mouseup",
-    (e) => {
-      mouseButtons = e.buttons;
-    },
-    true,
-  );
-  document.addEventListener(
-    "keyup",
-    (e) => {
-      if (isScanKey(e.key)) scanKeyHeld = false;
-    },
-    true,
-  );
-  window.addEventListener("blur", () => {
-    scanKeyHeld = false;
-    mouseButtons = 0;
-  });
-  document.documentElement.addEventListener("mouseleave", () => {
-    lastMouse = null;
-    clearTimeout(scanTimer);
-    clearHoverWordTarget();
-  });
   let mouseDownAt = null;
   let secondaryLookup = false;
   let selectionDismissed = false;
@@ -577,14 +468,6 @@
       return;
     }
     const selected = window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
-    if (treatScannedWordAsPopup) {
-      if (selected && window.hoshiSelection.selection) {
-        updateHoverWordTarget();
-        reportHoverWord(true);
-      } else {
-        clearHoverWordTarget();
-      }
-    }
     if (!selected && button === 0) {
       parent.postMessage({ hoshi: "lookup-miss", edge: clickEdge(e.clientX), dismissed: selectionDismissed }, "*");
     }

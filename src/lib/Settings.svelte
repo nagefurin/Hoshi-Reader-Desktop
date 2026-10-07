@@ -164,7 +164,7 @@
   let bindingKey = $state<Exclude<keyof HotkeyConfig, "clickLookup" | "hidePopupOnCursorExit" | "hidePopupOnCursorExitDelay" | "disableReaderWheel" | "reversePageVertical" | "scanDelay" | "pageClickZone"> | null>(null);
   let bindingError = $state("");
 
-  function startBinding(key: Exclude<keyof HotkeyConfig, "clickLookup" | "hidePopupOnCursorExit" | "hidePopupOnCursorExitDelay" | "disableReaderWheel" | "reversePageVertical" | "scanDelay" | "pageClickZone">, button: HTMLButtonElement) {
+  function startBinding(key: Exclude<keyof HotkeyConfig, "clickLookup" | "hidePopupOnCursorExit" | "hidePopupOnCursorExitDelay" | "treatScannedWordAsPopup" | "disableReaderWheel" | "reversePageVertical" | "scanDelay" | "pageClickZone">, button: HTMLButtonElement) {
     button.focus();
     bindingKey = key;
     bindingError = "";

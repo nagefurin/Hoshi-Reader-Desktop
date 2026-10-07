@@ -396,10 +396,20 @@ window.hoshiSelection = {
         
         const { sentence, clozeOffset } = this.getSentence(hit.node, hit.offset);
         const normalizedOffset = window.hoshiReader ? this.getNormalizedOffset(hit.node, hit.offset) : null;
+        const rects = ranges.flatMap(({ node, start, end }) => {
+            const range = document.createRange();
+            range.setStart(node, start);
+            range.setEnd(node, end);
+            return Array.from(range.getClientRects()).map(({ x, y, width, height }) => ({
+                x, y, width, height
+            }));
+        });
+
         webkit.messageHandlers.textSelected.postMessage({
             text,
             sentence,
             rect: this.getSelectionRect(x, y),
+            rects,
             normalizedOffset,
             clozeOffset
         });
@@ -407,40 +417,6 @@ window.hoshiSelection = {
         return text;
     },
     
-    isSelectionAtPoint(x, y) {
-        if (!this.selection?.ranges.length) {
-            return false;
-        }
-
-        for (const { node, start, end } of this.selection.ranges) {
-            const range = document.createRange();
-            range.setStart(node, start);
-            range.setEnd(node, end);
-            for (const rect of range.getClientRects()) {
-                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    },
-
-    getSelectionRects() {
-        if (!this.selection?.ranges.length) {
-            return [];
-        }
-
-        const rects = [];
-        for (const { node, start, end } of this.selection.ranges) {
-            const range = document.createRange();
-            range.setStart(node, start);
-            range.setEnd(node, end);
-            rects.push(...range.getClientRects());
-        }
-        return rects.map(({ left, top, right, bottom }) => ({ left, top, right, bottom }));
-    },
-
     getSelectionRect(x, y) {
         if (!this.selection?.ranges.length) {
             return null;

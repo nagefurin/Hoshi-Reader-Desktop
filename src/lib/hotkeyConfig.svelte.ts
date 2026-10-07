@@ -26,6 +26,7 @@ const defaults: HotkeyConfig = {
   clickLookup: "off",
   hidePopupOnCursorExit: false,
   hidePopupOnCursorExitDelay: 0,
+  treatScannedWordAsPopup: false,
   disableReaderWheel: false,
   sasayakiPreviousCue: "[",
   sasayakiNextCue: "]",

@@ -215,7 +215,6 @@
         `&sl=${dictConfig.scanLength}&snj=${dictConfig.scanNonJapaneseText ? 1 : 0}` +
         `&mod=${encodeURIComponent(hotkeyConfig.scanModifier)}&cl=${hotkeyConfig.clickLookup}` +
         `&sdl=\${hotkeyConfig.scanDelay}&cz=\${hotkeyConfig.pageClickZone}` +
-        `&tswp=\${hotkeyConfig.hidePopupOnCursorExit && hotkeyConfig.treatScannedWordAsPopup ? 1 : 0}` +
         `&tc=\${readerText ? readerText.slice(1) : ""}` +
         `&stc=${encodeURIComponent(sasayakiTextColor)}&sbc=${encodeURIComponent(sasayakiBackgroundColor)}`,
     );
@@ -429,7 +428,8 @@
   let popups = $state<PopupInstance[]>([]);
   let popupAnki = $state<PopupAnkiConfig | null>(null);
   const hider = cursorExitHider(closePopups);
-  let hoverWord = false;
+  let scannedWordHover = $state<{ left: number; top: number; width: number; height: number } | null>(null);
+  let scannedWordHovered = false;
   const hoveredPopups = new Set<string>();
   let hoverCloseTimer = 0;
 
@@ -441,17 +441,49 @@
     clearTimeout(hoverCloseTimer);
   }
 
+  function clearScannedWordHover() {
+    clearHoverCloseTimer();
+    scannedWordHover = null;
+    scannedWordHovered = false;
+    hoveredPopups.clear();
+  }
+
+  function setScannedWordHover(
+    sourceKey: number,
+    rects: { x: number; y: number; width: number; height: number }[],
+  ) {
+    if (!combinedHoverEnabled() || !rects.length) return;
+    const frame = frameEls.get(sourceKey);
+    if (!frame) return;
+    const frameRect = frame.getBoundingClientRect();
+    const contentRect = contentEl.getBoundingClientRect();
+    const left = Math.min(...rects.map((rect) => rect.x));
+    const top = Math.min(...rects.map((rect) => rect.y));
+    const right = Math.max(...rects.map((rect) => rect.x + rect.width));
+    const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+
+    scannedWordHover = {
+      left: frameRect.left + left - contentRect.left,
+      top: frameRect.top + top - contentRect.top,
+      width: right - left,
+      height: bottom - top,
+    };
+    scannedWordHovered = true;
+    clearHoverCloseTimer();
+    hider.cancel();
+  }
+
   function scheduleCombinedHoverClose() {
     clearHoverCloseTimer();
-    if (!combinedHoverEnabled() || hoverWord || hoveredPopups.size) return;
+    if (!combinedHoverEnabled() || scannedWordHovered || hoveredPopups.size) return;
     hoverCloseTimer = window.setTimeout(() => {
-      if (!hoverWord && hoveredPopups.size === 0) closePopups();
+      if (!scannedWordHovered && hoveredPopups.size === 0) closePopups();
     }, hotkeyConfig.hidePopupOnCursorExitDelay);
   }
 
   function setHoverWord(over: boolean) {
     if (!combinedHoverEnabled()) return;
-    hoverWord = over;
+    scannedWordHovered = over;
     if (over) {
       clearHoverCloseTimer();
       hider.cancel();
@@ -460,7 +492,7 @@
     }
   }
 
-  function setHoverPopup(id: string, index: number, over: boolean) {
+  function setHoverPopup(id: string, over: boolean) {
     if (!combinedHoverEnabled()) return;
     if (over) {
       hoveredPopups.add(id);
@@ -468,7 +500,6 @@
       hider.cancel();
     } else {
       hoveredPopups.delete(id);
-      hider.cancel();
       scheduleCombinedHoverClose();
     }
   }
@@ -521,7 +552,10 @@
       if (!nextIds.has(id)) hoveredPopups.delete(id);
     }
     popups = next;
-    if (!popups.length && clearSelection) postToFrame({ hoshi: "clear-selection" });
+    if (!popups.length) {
+      clearScannedWordHover();
+      if (clearSelection) postToFrame({ hoshi: "clear-selection" });
+    }
     resumeAfterPopups();
   }
 
@@ -553,9 +587,14 @@
     offset: number | null = null,
   ) {
     hider.cancel();
+    clearHoverCloseTimer();
     const seq = ++lookupSeq;
     const response = await lookup(text);
-    if (seq !== lookupSeq || !response.entries.length) return;
+    if (seq !== lookupSeq) return;
+    if (!response.entries.length) {
+      clearScannedWordHover();
+      return;
+    }
     popupAnki = await invoke<PopupAnkiConfig>("anki_config");
     if (seq !== lookupSeq) return;
     let placement = popups[0]?.placement ?? { left: 0, top: 0, width: 0, height: 0 };
@@ -1258,6 +1297,9 @@
     if (sourceKey !== frames[frames.length - 1]?.key) return;
     switch (m?.hoshi) {
       case "selected":
+        if (combinedHoverEnabled()) {
+          setScannedWordHover(sourceKey, m.rects ?? (m.rect ? [m.rect] : []));
+        }
         pressLookup = openLookup(m.text, m.rect, m.normalizedOffset, m.sentence, m.clozeOffset);
         break;
       case "lookup-miss":
@@ -1265,9 +1307,6 @@
         if (pressDismissed || m.dismissed) break;
         if (m.edge) postTurn((m.edge === "right") !== (vertical && hotkeyConfig.reversePageVertical) ? "forward" : "backward");
         else if (readerConfig.paragraphMode && readerConfig.clickToAdvance) postTurn("forward");
-        break;
-      case "hover-word":
-        setHoverWord(Boolean(m.over));
         break;
       case "press":
         pressDismissed = popups.length > 0 || readerPanel !== null || showBar;
@@ -1713,6 +1752,14 @@
         ></iframe>
       {/each}
     </div>
+    {#if scannedWordHover && combinedHoverEnabled() && !loading}
+      <div
+        class="absolute z-20"
+        style="left: {scannedWordHover.left}px; top: {scannedWordHover.top}px; width: {scannedWordHover.width}px; height: {scannedWordHover.height}px;"
+        onmouseenter={() => setHoverWord(true)}
+        onmouseleave={() => setHoverWord(false)}
+      ></div>
+    {/if}
     {#if loading}
       <div
         class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center"
@@ -2093,7 +2140,7 @@
       onPress={() => closePopups(i + 1)}
       onClose={() => closePopups(i)}
       onHover={(over) => {
-        if (combinedHoverEnabled()) setHoverPopup(popup.id, i, over);
+        if (combinedHoverEnabled()) setHoverPopup(popup.id, over);
         else hider.hover(over ? i : -1);
       }}
       onMine={(content) => mineEntry(content, popup)}
