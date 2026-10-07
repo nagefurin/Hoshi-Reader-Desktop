@@ -407,6 +407,16 @@ window.hoshiSelection = {
         return text;
     },
     
+    isSelectionAtPoint(x, y) {
+        const hit = this.getCharacterAtPoint(x, y);
+        if (!hit || !this.selection?.ranges.length) {
+            return false;
+        }
+        return this.selection.ranges.some(({ node, start, end }) =>
+            node === hit.node && hit.offset >= start && hit.offset < end
+        );
+    },
+
     getSelectionRect(x, y) {
         if (!this.selection?.ranges.length) {
             return null;

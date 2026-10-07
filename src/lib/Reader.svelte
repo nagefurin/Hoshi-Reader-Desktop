@@ -214,8 +214,9 @@
         `&ta=${readerConfig.textAnimation ? 1 : 0}&ts=${readerConfig.textSpeed}&ca=${readerConfig.clickToAdvance ? 1 : 0}` +
         `&sl=${dictConfig.scanLength}&snj=${dictConfig.scanNonJapaneseText ? 1 : 0}` +
         `&mod=${encodeURIComponent(hotkeyConfig.scanModifier)}&cl=${hotkeyConfig.clickLookup}` +
-        `&sdl=${hotkeyConfig.scanDelay}&cz=${hotkeyConfig.pageClickZone}` +
-        `&tc=${readerText ? readerText.slice(1) : ""}` +
+        `&sdl=\${hotkeyConfig.scanDelay}&cz=\${hotkeyConfig.pageClickZone}` +
+        `&tswp=\${hotkeyConfig.hidePopupOnCursorExit && hotkeyConfig.treatScannedWordAsPopup ? 1 : 0}` +
+        `&tc=\${readerText ? readerText.slice(1) : ""}` +
         `&stc=${encodeURIComponent(sasayakiTextColor)}&sbc=${encodeURIComponent(sasayakiBackgroundColor)}`,
     );
   }
@@ -428,6 +429,49 @@
   let popups = $state<PopupInstance[]>([]);
   let popupAnki = $state<PopupAnkiConfig | null>(null);
   const hider = cursorExitHider(closePopups);
+  let hoverWord = false;
+  const hoveredPopups = new Set<string>();
+  let hoverCloseTimer = 0;
+
+  function combinedHoverEnabled() {
+    return hotkeyConfig.hidePopupOnCursorExit && hotkeyConfig.treatScannedWordAsPopup;
+  }
+
+  function clearHoverCloseTimer() {
+    clearTimeout(hoverCloseTimer);
+  }
+
+  function scheduleCombinedHoverClose() {
+    clearHoverCloseTimer();
+    if (!combinedHoverEnabled() || hoverWord || hoveredPopups.size) return;
+    hoverCloseTimer = window.setTimeout(() => {
+      if (!hoverWord && hoveredPopups.size === 0) closePopups();
+    }, hotkeyConfig.hidePopupOnCursorExitDelay);
+  }
+
+  function setHoverWord(over: boolean) {
+    if (!combinedHoverEnabled()) return;
+    hoverWord = over;
+    if (over) {
+      clearHoverCloseTimer();
+      hider.cancel();
+    } else {
+      scheduleCombinedHoverClose();
+    }
+  }
+
+  function setHoverPopup(id: string, index: number, over: boolean) {
+    if (!combinedHoverEnabled()) return;
+    if (over) {
+      hoveredPopups.add(id);
+      clearHoverCloseTimer();
+      hider.hover(index);
+    } else {
+      hoveredPopups.delete(id);
+      hider.cancel();
+      scheduleCombinedHoverClose();
+    }
+  }
 
   function postToFrame(message: unknown) {
     activeEl()?.contentWindow?.postMessage(message, "*");
@@ -471,7 +515,12 @@
   function closePopups(keep = 0, clearSelection = true) {
     lookupSeq++;
     if (popups.length <= keep) return;
-    popups = popups.slice(0, keep);
+    const next = popups.slice(0, keep);
+    const nextIds = new Set(next.map((popup) => popup.id));
+    for (const id of hoveredPopups) {
+      if (!nextIds.has(id)) hoveredPopups.delete(id);
+    }
+    popups = next;
     if (!popups.length && clearSelection) postToFrame({ hoshi: "clear-selection" });
     resumeAfterPopups();
   }
@@ -1216,6 +1265,9 @@
         if (pressDismissed || m.dismissed) break;
         if (m.edge) postTurn((m.edge === "right") !== (vertical && hotkeyConfig.reversePageVertical) ? "forward" : "backward");
         else if (readerConfig.paragraphMode && readerConfig.clickToAdvance) postTurn("forward");
+        break;
+      case "hover-word":
+        setHoverWord(Boolean(m.over));
         break;
       case "press":
         pressDismissed = popups.length > 0 || readerPanel !== null || showBar;
@@ -2040,7 +2092,10 @@
       onSelected={(text, sentence, offset, rect) => popupLookup(i, text, sentence, offset, rect)}
       onPress={() => closePopups(i + 1)}
       onClose={() => closePopups(i)}
-      onHover={(over) => hider.hover(over ? i : -1)}
+      onHover={(over) => {
+        if (combinedHoverEnabled()) setHoverPopup(popup.id, i, over);
+        else hider.hover(over ? i : -1);
+      }}
       onMine={(content) => mineEntry(content, popup)}
       onDuplicateCheck={checkDuplicates}
       onShowNotes={showNotes}

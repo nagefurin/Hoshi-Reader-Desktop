@@ -8,6 +8,7 @@ export type HotkeyConfig = {
   clickLookup: ClickLookup;
   hidePopupOnCursorExit: boolean;
   hidePopupOnCursorExitDelay: number;
+  treatScannedWordAsPopup: boolean;
   disableReaderWheel: boolean;
   sasayakiPreviousCue: string;
   sasayakiNextCue: string;

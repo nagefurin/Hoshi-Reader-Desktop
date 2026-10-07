@@ -1,0 +1,40 @@
+name: 'build slop testing'
+
+on:
+  push:
+    branches:
+      - 'slop-testing'
+  workflow_dispatch:
+
+jobs:
+  build-tauri:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: setup node
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: build Hoshi Reader
+        shell: bash
+        run: pnpm tauri build --no-sign --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: upload Windows bundles
+        uses: actions/upload-artifact@v6
+        with:
+          name: Hoshi-Reader-Windows-slop-testing
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error

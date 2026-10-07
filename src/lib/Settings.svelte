@@ -1341,6 +1341,11 @@
             onchange={saveHotkeyConfig}
           />
           {#if hotkeyConfig.hidePopupOnCursorExit}
+            <SettingToggle
+              label="Treat Scanned Word Also as Popup"
+              bind:checked={hotkeyConfig.treatScannedWordAsPopup}
+              onchange={saveHotkeyConfig}
+            />
             <SettingSlider
               label="Hide Delay"
               bind:value={hotkeyConfig.hidePopupOnCursorExitDelay}

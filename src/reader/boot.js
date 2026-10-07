@@ -46,6 +46,7 @@
   window.scanNonJapaneseText = params.get("snj") !== "0";
   const scanModifier = params.get("mod");
   const scanDelay = Number(params.get("sdl"));
+  const treatScannedWordAsPopup = params.get("tswp") === "1";
   const clickLookup = params.get("cl");
   const clickZone = Number(params.get("cz")) / 100;
   function clickEdge(x) {
@@ -397,6 +398,13 @@
   let lastMouse = null;
   let mouseButtons = 0;
   let scanTimer = 0;
+  let hoverWord = false;
+
+  function reportHoverWord(over) {
+    if (!treatScannedWordAsPopup || hoverWord === over) return;
+    hoverWord = over;
+    parent.postMessage({ hoshi: "hover-word", over }, "*");
+  }
   document.addEventListener(
     "mousemove",
     (e) => {
@@ -404,17 +412,22 @@
       lastMouse = { x: e.clientX, y: e.clientY };
       clearTimeout(scanTimer);
       if (e.buttons) return;
+      if (treatScannedWordAsPopup) {
+        reportHoverWord(window.hoshiSelection.isSelectionAtPoint(e.clientX, e.clientY));
+      }
       if (!modifierHeld(e)) {
         if (!scanModifier) {
           scanTimer = setTimeout(() => {
             if (window.hoshiParagraph.animationFrame) return;
             window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
+            if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
           }, scanDelay);
         }
         return;
       }
       if (window.hoshiParagraph.finishTextAnimation()) return;
       window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
+      if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
     },
     true,
   );
@@ -426,6 +439,7 @@
       if (e.repeat || !lastMouse || mouseButtons) return;
       if (window.hoshiParagraph.finishTextAnimation()) return;
       window.hoshiSelection.selectText(lastMouse.x, lastMouse.y, window.scanLength);
+      if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
     },
     true,
   );
@@ -450,6 +464,7 @@
   document.documentElement.addEventListener("mouseleave", () => {
     lastMouse = null;
     clearTimeout(scanTimer);
+    reportHoverWord(false);
   });
   let mouseDownAt = null;
   let secondaryLookup = false;
@@ -522,6 +537,7 @@
       return;
     }
     const selected = window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
+    if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
     if (!selected && button === 0) {
       parent.postMessage({ hoshi: "lookup-miss", edge: clickEdge(e.clientX), dismissed: selectionDismissed }, "*");
     }
