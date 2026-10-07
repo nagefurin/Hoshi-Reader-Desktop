@@ -399,11 +399,30 @@
   let mouseButtons = 0;
   let scanTimer = 0;
   let hoverWord = false;
+  let hoverWordRects = [];
 
   function reportHoverWord(over) {
     if (!treatScannedWordAsPopup || hoverWord === over) return;
     hoverWord = over;
     parent.postMessage({ hoshi: "hover-word", over }, "*");
+  }
+
+  function pointInHoverWord(x, y) {
+    return hoverWordRects.some((rect) =>
+      x >= rect.left - 2 &&
+      x <= rect.right + 2 &&
+      y >= rect.top - 2 &&
+      y <= rect.bottom + 2
+    );
+  }
+
+  function updateHoverWordTarget() {
+    hoverWordRects = window.hoshiSelection.getSelectionRects();
+  }
+
+  function clearHoverWordTarget() {
+    hoverWordRects = [];
+    reportHoverWord(false);
   }
   document.addEventListener(
     "mousemove",
@@ -413,21 +432,35 @@
       clearTimeout(scanTimer);
       if (e.buttons) return;
       if (treatScannedWordAsPopup) {
-        reportHoverWord(window.hoshiSelection.isSelectionAtPoint(e.clientX, e.clientY));
+        reportHoverWord(pointInHoverWord(e.clientX, e.clientY));
       }
       if (!modifierHeld(e)) {
         if (!scanModifier) {
           scanTimer = setTimeout(() => {
             if (window.hoshiParagraph.animationFrame) return;
-            window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
-            if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
+            const selected = window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
+            if (treatScannedWordAsPopup) {
+              if (selected && window.hoshiSelection.selection) {
+                updateHoverWordTarget();
+                reportHoverWord(true);
+              } else {
+                clearHoverWordTarget();
+              }
+            }
           }, scanDelay);
         }
         return;
       }
       if (window.hoshiParagraph.finishTextAnimation()) return;
-      window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
-      if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
+      const selected = window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
+      if (treatScannedWordAsPopup) {
+        if (selected && window.hoshiSelection.selection) {
+          updateHoverWordTarget();
+          reportHoverWord(true);
+        } else {
+          clearHoverWordTarget();
+        }
+      }
     },
     true,
   );
@@ -438,8 +471,15 @@
       scanKeyHeld = true;
       if (e.repeat || !lastMouse || mouseButtons) return;
       if (window.hoshiParagraph.finishTextAnimation()) return;
-      window.hoshiSelection.selectText(lastMouse.x, lastMouse.y, window.scanLength);
-      if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
+      const selected = window.hoshiSelection.selectText(lastMouse.x, lastMouse.y, window.scanLength);
+      if (treatScannedWordAsPopup) {
+        if (selected && window.hoshiSelection.selection) {
+          updateHoverWordTarget();
+          reportHoverWord(true);
+        } else {
+          clearHoverWordTarget();
+        }
+      }
     },
     true,
   );
@@ -464,7 +504,7 @@
   document.documentElement.addEventListener("mouseleave", () => {
     lastMouse = null;
     clearTimeout(scanTimer);
-    reportHoverWord(false);
+    clearHoverWordTarget();
   });
   let mouseDownAt = null;
   let secondaryLookup = false;
@@ -537,7 +577,14 @@
       return;
     }
     const selected = window.hoshiSelection.selectText(e.clientX, e.clientY, window.scanLength);
-    if (treatScannedWordAsPopup) reportHoverWord(Boolean(window.hoshiSelection.selection));
+    if (treatScannedWordAsPopup) {
+      if (selected && window.hoshiSelection.selection) {
+        updateHoverWordTarget();
+        reportHoverWord(true);
+      } else {
+        clearHoverWordTarget();
+      }
+    }
     if (!selected && button === 0) {
       parent.postMessage({ hoshi: "lookup-miss", edge: clickEdge(e.clientX), dismissed: selectionDismissed }, "*");
     }

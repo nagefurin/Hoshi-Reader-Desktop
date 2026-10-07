@@ -426,6 +426,21 @@ window.hoshiSelection = {
         return false;
     },
 
+    getSelectionRects() {
+        if (!this.selection?.ranges.length) {
+            return [];
+        }
+
+        const rects = [];
+        for (const { node, start, end } of this.selection.ranges) {
+            const range = document.createRange();
+            range.setStart(node, start);
+            range.setEnd(node, end);
+            rects.push(...range.getClientRects());
+        }
+        return rects.map(({ left, top, right, bottom }) => ({ left, top, right, bottom }));
+    },
+
     getSelectionRect(x, y) {
         if (!this.selection?.ranges.length) {
             return null;
