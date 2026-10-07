@@ -408,13 +408,22 @@ window.hoshiSelection = {
     },
     
     isSelectionAtPoint(x, y) {
-        const hit = this.getCharacterAtPoint(x, y);
-        if (!hit || !this.selection?.ranges.length) {
+        if (!this.selection?.ranges.length) {
             return false;
         }
-        return this.selection.ranges.some(({ node, start, end }) =>
-            node === hit.node && hit.offset >= start && hit.offset < end
-        );
+
+        for (const { node, start, end } of this.selection.ranges) {
+            const range = document.createRange();
+            range.setStart(node, start);
+            range.setEnd(node, end);
+            for (const rect of range.getClientRects()) {
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     },
 
     getSelectionRect(x, y) {

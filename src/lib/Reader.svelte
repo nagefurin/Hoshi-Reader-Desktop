@@ -465,7 +465,7 @@
     if (over) {
       hoveredPopups.add(id);
       clearHoverCloseTimer();
-      hider.hover(index);
+      hider.cancel();
     } else {
       hoveredPopups.delete(id);
       hider.cancel();
