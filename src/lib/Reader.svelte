@@ -1173,6 +1173,22 @@
   }
 
   let pendingSearchHighlight: { character: number; length: number } | null = null;
+  let pendingTtsHighlight: { chapterIndex: number; text: string } | null = null;
+
+  function onTtsReadSegment(spineIndex: number, text: string) {
+    pendingTtsHighlight = { chapterIndex: spineIndex, text };
+    if (spineIndex !== index) {
+      navigateTo(spineIndex, 0);
+      return;
+    }
+    pendingTtsHighlight = null;
+    postToFrame({ hoshi: "tts-highlight", text, reveal: true });
+  }
+
+  function clearTtsHighlight() {
+    pendingTtsHighlight = null;
+    postToFrame({ hoshi: "tts-clear" });
+  }
 
   function jumpToSearchResult(result: BookSearchResult) {
     pendingSearchHighlight = { character: result.character, length: result.length };
@@ -1460,6 +1476,11 @@
           const chapter = bookInfo.chapterInfo[spine[index]];
           postToFrame({ hoshi: "search-highlight", spine: index, offset: pendingSearchHighlight.character - chapter.currentTotal, length: pendingSearchHighlight.length });
           pendingSearchHighlight = null;
+        }
+        if (pendingTtsHighlight?.chapterIndex === index) {
+          const { text } = pendingTtsHighlight;
+          pendingTtsHighlight = null;
+          postToFrame({ hoshi: "tts-highlight", text, reveal: true });
         }
         sasayaki?.handleRestoreCompleted(index);
         if (pageAdvance) postToFrame({ hoshi: "page-cues", play: pendingPagePlayback });
@@ -2320,7 +2341,13 @@
 
       {#if side === "right"}
         <div class="min-h-0 flex-1 flex-col {panel === 'TTS' ? 'flex' : 'hidden'}">
-          <TtsPanel {id} {title} currentChapterIndex={index} onNavigate={(spineIndex) => navigateTo(spineIndex, 0)} />
+          <TtsPanel
+            {id}
+            {title}
+            currentChapterIndex={index}
+            onReadSegment={onTtsReadSegment}
+            onClearHighlight={clearTtsHighlight}
+          />
         </div>
       {/if}
 
