@@ -194,7 +194,8 @@
         user-select: none !important;
       }
       ${chromium ? ".hoshi-sasayaki-cue { box-shadow: 0 0 0 transparent; }" : ""}
-      .hoshi-sasayaki-cue.hoshi-sasayaki-active {
+      .hoshi-sasayaki-cue.hoshi-sasayaki-active,
+      .hoshi-tts-cue.hoshi-tts-active {
         color: var(--hoshi-sasayaki-text-color) !important;
         background-color: var(--hoshi-sasayaki-background-color) !important;
       }
@@ -631,6 +632,14 @@
       }
       case "sasayaki-clear":
         r.clearSasayakiCue();
+        break;
+      case "tts-highlight": {
+        const progress = r.highlightTtsText(m.text, m.reveal);
+        if (typeof progress === "number") commitProgress(progress);
+        break;
+      }
+      case "tts-clear":
+        r.clearTtsHighlight();
         break;
       case "sasayaki-cues":
         applyCues(m.cues);
