@@ -1178,7 +1178,11 @@
   function onTtsReadSegment(spineIndex: number, text: string) {
     pendingTtsHighlight = { chapterIndex: spineIndex, text };
     if (spineIndex !== index) {
-      navigateTo(spineIndex, 0);
+      const chapter = bookInfo.chapterInfo[spine[spineIndex]];
+      const progress = continuous && chapter && bookInfo.characterCount > 0
+        ? chapter.currentTotal / bookInfo.characterCount
+        : 0;
+      navigateTo(spineIndex, progress);
       return;
     }
     pendingTtsHighlight = null;
