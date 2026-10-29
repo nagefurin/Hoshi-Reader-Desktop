@@ -325,7 +325,8 @@
       </div>
     {/if}
   </SettingRow>
-  {#if ["device", "edge", "azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)}
+  {#if ["device", "edge", "azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine) &&
+      !(ttsConfig.engine === "googleCloud" && /Chirp|Journey/i.test(ttsConfig.googleCloudVoice))}
     <SettingRow compact={compact} label={ttsConfig.engine === "edge" ? "Pitch (Hz)" : ttsConfig.engine === "device" ? "Pitch" : "Pitch (semitones)"}>
       <div class="flex w-56 items-center gap-3">
         <input
