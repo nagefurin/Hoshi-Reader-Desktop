@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::net::IpAddr;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -193,34 +192,6 @@ fn local_or_private_host(host: &str) -> bool {
         Ok(IpAddr::V6(address)) => address.is_loopback() || address.is_unspecified() || address.is_unique_local() || address.is_unicast_link_local(),
         Err(_) => false,
     }
-}
-
-fn validate_endpoint(value: &str) -> Result<Url, String> {
-    let url = Url::parse(value.trim()).map_err(|_| "Enter a valid TTS endpoint URL.".to_string())?;
-    if !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
-        return Err("The TTS endpoint URL cannot contain credentials, a query, or a fragment.".to_string());
-    }
-    match url.scheme() {
-        "https" => {}
-        "http" if local_or_private_host(url.host_str().unwrap_or_default()) => {}
-        _ => return Err("Remote TTS endpoints must use HTTPS. HTTP is allowed only for localhost or a private-network host.".to_string()),
-    }
-    Ok(url)
-}
-
-fn endpoint_url(base: Url, suffix: &str) -> Url {
-    let current_path = base.path().trim_end_matches('/');
-    let suffix = suffix.trim_start_matches('/');
-    let path = if current_path.ends_with(suffix) {
-        current_path.to_string()
-    } else if current_path.is_empty() {
-        format!("/{suffix}")
-    } else {
-        format!("{current_path}/{suffix}")
-    };
-    let mut url = base;
-    url.set_path(&path);
-    url
 }
 
 fn request_client() -> Result<Client, String> {
@@ -972,7 +943,6 @@ pub async fn tts_synthesize(
     text: String,
     base_url: String,
     api_key: String,
-    model: String,
     voice: String,
     rate: f32,
     pitch: f32,
@@ -1014,29 +984,6 @@ pub async fn tts_synthesize(
         "azure" => tts_azure_synthesize(&client, &base_url, &api_key, &text, &voice, rate, pitch, &options).await,
         "microsoftTranslator" => tts_translator_synthesize(&client, &text, &voice, rate, pitch, &options).await,
         "googleCloud" => tts_google_cloud_synthesize(&client, &api_key, &text, &voice, rate, pitch, &options).await,
-        "openAi" => {
-            let base = validate_endpoint(&base_url)?;
-            if model.trim().is_empty() || voice.trim().is_empty() {
-                return Err("OpenAI-compatible TTS requires a model and voice.".to_string());
-            }
-            let endpoint = endpoint_url(base, "audio/speech");
-            let mut request = client.post(endpoint).json(&json!({
-                "model": model.trim(),
-                "input": text,
-                "voice": voice.trim(),
-                "speed": rate,
-                "response_format": if options.is_wav() { "wav" } else { "mp3" }
-            }));
-            if !api_key.trim().is_empty() {
-                request = request.bearer_auth(api_key.trim());
-            }
-            let response = request
-                .header("Accept", "audio/mpeg, audio/*")
-                .send()
-                .await
-                .map_err(|_| "Could not connect to the configured OpenAI-compatible TTS endpoint.".to_string())?;
-            finish_audio(response).await
-        }
         _ => Err("Unsupported TTS engine.".to_string()),
     }
 }
