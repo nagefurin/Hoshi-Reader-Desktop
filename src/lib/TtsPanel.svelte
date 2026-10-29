@@ -14,6 +14,7 @@
     chapterIndex: number;
     chapterTitle: string;
     text: string;
+    sourceText: string;
     dialogue: boolean;
   };
 
@@ -21,12 +22,14 @@
     id,
     title,
     currentChapterIndex,
-    onNavigate,
+    onReadSegment,
+    onClearHighlight,
   }: {
     id: string;
     title: string;
     currentChapterIndex: number;
-    onNavigate: (spineIndex: number) => void;
+    onReadSegment: (spineIndex: number, sourceText: string) => void;
+    onClearHighlight: () => void;
   } = $props();
 
   let chapters = $state<TtsChapter[]>([]);
@@ -39,7 +42,6 @@
   let runId = 0;
   let currentAudio: HTMLAudioElement | null = null;
   let currentUtterance: SpeechSynthesisUtterance | null = null;
-  let lastNavigatedChapter = -1;
 
   const currentSegment = $derived(segments[position] ?? null);
   const progressText = $derived(segments.length ? (Math.min(position + 1, segments.length) + " / " + segments.length) : "—");
@@ -100,18 +102,22 @@
     const result: SpokenSegment[] = [];
     for (const chapter of values) {
       if (chapter.spineIndex < startIndex) continue;
-      const prepared = applyReplacements(chapter.text);
+      const prepared = chapter.text;
       for (const paragraph of prepared.split(/\n+/u)) {
         // Split the full paragraph first so punctuation inside Japanese quotes keeps its dialogue voice.
         for (const part of splitQuoted(paragraph)) {
           for (const sentence of sentenceParts(part.text)) {
             for (const text of splitLong(sentence)) {
-              if (text.trim()) result.push({
-                chapterIndex: chapter.spineIndex,
-                chapterTitle: chapter.title,
-                text: text.trim(),
-                dialogue: part.dialogue,
-              });
+              if (text.trim()) {
+                const sourceText = text.trim();
+                result.push({
+                  chapterIndex: chapter.spineIndex,
+                  chapterTitle: chapter.title,
+                  text: applyReplacements(sourceText),
+                  sourceText,
+                  dialogue: part.dialogue,
+                });
+              }
             }
           }
         }
@@ -145,7 +151,6 @@
     paused = false;
     loading = true;
     errorMessage = "";
-    lastNavigatedChapter = -1;
     try {
       const loaded = await invoke<TtsChapter[]>("tts_load_text", {
         id,
@@ -193,13 +198,10 @@
     if (segmentIndex >= segments.length) {
       active = false;
       paused = false;
+      onClearHighlight();
       return;
     }
     const segment = segments[segmentIndex];
-    if (segment.chapterIndex !== lastNavigatedChapter) {
-      lastNavigatedChapter = segment.chapterIndex;
-      onNavigate(segment.chapterIndex);
-    }
 
     if (ttsConfig.engine === "device") {
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -226,6 +228,7 @@
         paused = false;
       };
       currentUtterance = utterance;
+      onReadSegment(segment.chapterIndex, segment.sourceText);
       window.speechSynthesis.speak(utterance);
       if (paused) window.speechSynthesis.pause();
       return;
@@ -259,12 +262,14 @@
         paused = false;
       };
       currentAudio = audio;
+      onReadSegment(segment.chapterIndex, segment.sourceText);
       if (!paused) await audio.play();
     } catch (error) {
       if (token === runId) {
         errorMessage = String(error);
         active = false;
         paused = false;
+        onClearHighlight();
       }
     }
   }
@@ -301,6 +306,7 @@
     active = false;
     paused = false;
     loading = false;
+    onClearHighlight();
   }
 
   onDestroy(() => {
