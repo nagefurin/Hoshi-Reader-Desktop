@@ -108,8 +108,8 @@
       if (chapter.spineIndex < startIndex) continue;
       const sourceText = chapter.text;
       const spokenText = ttsConfig.useRubyReadings ? chapter.rubyText : chapter.text;
-      const sourceParagraphs = sourceText.split(/\\n+/u);
-      const spokenParagraphs = spokenText.split(/\\n+/u);
+      const sourceParagraphs = sourceText.split(/\n+/u);
+      const spokenParagraphs = spokenText.split(/\n+/u);
       let sourceSearchFrom = 0;
       let imageCursor = 0;
       const imageOffsets = chapter.imageOffsets ?? [];
