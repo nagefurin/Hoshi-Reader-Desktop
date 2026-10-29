@@ -1408,7 +1408,7 @@
         (binding) =>
           binding.key === "toggleTracking" ||
           (binding.key === "manualBookmark" && !continuous) ||
-          (binding.section === "Sasayaki" && sasayaki?.hasAudio) ||
+          (binding.section === "Sasayaki" && (sasayaki?.hasAudio || ttsSessionActive)) ||
           (binding.section === "Popup" && popups.length > 0),
       )
       .map((binding) => hotkeyConfig[binding.key])

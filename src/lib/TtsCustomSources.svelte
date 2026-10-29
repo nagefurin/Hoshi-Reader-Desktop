@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import SettingsSection from "./SettingsSection.svelte";
-  import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsCustomProtocol, type TtsCustomSource } from "./ttsConfig.svelte";
+  import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsCustomProtocol, type TtsCustomSource, type TtsEngine } from "./ttsConfig.svelte";
 
   let { compact = false }: { compact?: boolean } = $props();
   type TtsVoiceInfo = { id: string; styles: string[]; roles: string[] };
@@ -37,7 +37,7 @@
   }
 
   function activate(source: TtsCustomSource) {
-    ttsConfig.engine = source.id;
+    ttsConfig.engine = source.id as TtsEngine;
     editingId = source.id;
     save();
   }

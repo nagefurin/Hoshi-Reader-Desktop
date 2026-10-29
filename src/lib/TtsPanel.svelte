@@ -1,23 +1,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { AudioLines, Pause, Play, Repeat, SkipBack, SkipForward, Square } from "@
-
-  const READER_CHARACTER = /[0-9A-Za-z○◯々-〇〻ぁ-ゖゝ-ゞァ-ヺー０-９Ａ-Ｚａ-ｚｦ-ﾝ가-힣ㄱ-ㆎ⺀-⿕⼀-⿕\p{Unified_Ideograph}]/u;
-
-  function countReaderCharacters(value: string): number {
-    let count = 0;
-    for (const character of Array.from(value)) {
-      if (READER_CHARACTER.test(character)) count++;
-    }
-    return count;
-  }
-
-  function readerCharacterOffset(): number {
-    return Math.max(0, Math.round(currentCharacterCount - currentChapterCharacterStart));
-  }
-
-lucide/svelte";
+  import { AudioLines, Pause, Play, Repeat, SkipBack, SkipForward, Square } from "@lucide/svelte";
   import { ttsConfig, ttsRuntime } from "./ttsConfig.svelte";
   import TtsSettings from "./TtsSettings.svelte";
   import { sasayakiConfig } from "./sasayakiConfig.svelte";
@@ -35,6 +19,20 @@ lucide/svelte";
   };
 
   type TtsRubyRange = { start: number; end: number; reading: string };
+
+  const READER_CHARACTER = /[0-9A-Za-z○◯々-〇〻ぁ-ゖゝ-ゞァ-ヺー０-９Ａ-Ｚａ-ｚｦ-ﾝ가-힣ㄱ-ㆎ⺀-⿕⼀-⿕\p{Unified_Ideograph}]/u;
+
+  function countReaderCharacters(value: string): number {
+    let count = 0;
+    for (const character of Array.from(value)) {
+      if (READER_CHARACTER.test(character)) count++;
+    }
+    return count;
+  }
+
+  function readerCharacterOffset(): number {
+    return Math.max(0, Math.round(currentCharacterCount - currentChapterCharacterStart));
+  }
 
   type SpokenSegment = {
     chapterIndex: number;
@@ -625,6 +623,8 @@ lucide/svelte";
       if (!paused) await audio.play();
     } catch (error) {
       if (token === runId) {
+        const isPauseAbort = paused && error instanceof Error && error.name === "AbortError";
+        if (isPauseAbort) return;
         errorMessage = String(error);
         active = false;
         paused = false;
@@ -658,8 +658,10 @@ lucide/svelte";
       try {
         await currentAudio.play();
       } catch (error) {
+        if (paused && error instanceof Error && error.name === "AbortError") return;
         errorMessage = String(error);
         active = false;
+        sessionActive = false;
         onClearHighlight();
       }
     }
