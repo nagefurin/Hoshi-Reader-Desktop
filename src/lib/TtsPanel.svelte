@@ -315,7 +315,7 @@
       <p class="text-sm font-semibold">Text-to-Speech</p>
       <p class="line-clamp-2 text-xs text-base-content/60">{title}</p>
       <p class="mt-1 text-xs text-base-content/60">
-        {ttsConfig.engine === "device" ? "System voice" : ttsConfig.engine === "googleTranslate" ? "Google Translate" : ttsConfig.engine === "openAi" ? "OpenAI-compatible" : "VITS self-hosted"}
+        {ttsConfig.engine === "device" ? "System voice" : ttsConfig.engine === "edge" ? "Microsoft Edge TTS" : ttsConfig.engine === "googleTranslate" ? "Google Translate" : ttsConfig.engine === "openAi" ? "OpenAI-compatible" : "VITS self-hosted"}
       </p>
     </div>
   </div>

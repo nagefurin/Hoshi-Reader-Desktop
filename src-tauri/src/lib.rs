@@ -145,6 +145,7 @@ pub fn run() {
             transcriber::sasayaki_pause_transcription,
             transcriber::sasayaki_transcribe,
             tts::tts_load_text,
+            tts::tts_edge_voices,
             tts::tts_synthesize,
             #[cfg(windows)]
             media_controls::media_controls_metadata,
