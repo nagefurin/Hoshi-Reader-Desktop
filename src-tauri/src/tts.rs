@@ -36,6 +36,7 @@ pub struct TtsChapter {
     pub text: String,
     pub ruby_text: String,
     pub image_offsets: Vec<usize>,
+    pub image_index_start: usize,
 }
 
 static RE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
@@ -199,6 +200,7 @@ pub async fn tts_load_text(app: AppHandle, id: String, _use_ruby_readings: bool)
     let document = book::book_document(&epub);
     let mut chapters = Vec::new();
     let mut compact_spine_index = 0usize;
+    let mut global_image_index = 0usize;
 
     for entry in epub.spine().iter() {
         let Some(item) = entry.manifest_entry() else {
@@ -206,13 +208,17 @@ pub async fn tts_load_text(app: AppHandle, id: String, _use_ruby_readings: bool)
         };
         let spine_index = compact_spine_index;
         compact_spine_index += 1;
+        let Ok(content) = item.read_str() else {
+            continue;
+        };
+
+        let body = library::body(&content);
+        let image_index_start = global_image_index;
+        global_image_index += RE_IMAGE_TAG.find_iter(body).count();
 
         if !entry.is_linear() || item.properties().as_str().contains("nav") {
             continue;
         }
-        let Ok(content) = item.read_str() else {
-            continue;
-        };
         let (text, image_offsets) = speakable_text_with_images(&content);
         let ruby_text = speakable_text(&content, true);
         if text.trim().is_empty() {
@@ -226,7 +232,7 @@ pub async fn tts_load_text(app: AppHandle, id: String, _use_ruby_readings: bool)
             .filter(|label| !label.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| format!("Chapter {}", spine_index + 1));
-        chapters.push(TtsChapter { spine_index, title, text, ruby_text, image_offsets });
+        chapters.push(TtsChapter { spine_index, title, text, ruby_text, image_offsets, image_index_start });
     }
 
     if chapters.is_empty() {
