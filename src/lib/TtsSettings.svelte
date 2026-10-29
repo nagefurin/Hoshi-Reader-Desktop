@@ -361,6 +361,119 @@
   {/if}
 </SettingsSection>
 
+{#if !["device", "googleTranslate"].includes(ttsConfig.engine)}
+  <SettingsSection compact={compact} title="Synthesis">
+    <SettingRow compact={compact} label="Synthesis Volume">
+      <div class="flex w-56 items-center gap-3">
+        <input
+          class="range range-xs flex-1"
+          type="range"
+          min={ttsConfig.engine === "googleCloud" ? -96 : -100}
+          max={ttsConfig.engine === "googleCloud" ? 16 : 100}
+          step="1"
+          value={currentOptions().volume}
+          oninput={(event) => updateOptions({ volume: Number(event.currentTarget.value) })}
+        />
+        <span class="w-14 text-right text-xs tabular-nums">
+          {ttsConfig.engine === "googleCloud" ? Math.round(currentOptions().volume) + " dB" : Math.round(currentOptions().volume) + "%"}
+        </span>
+      </div>
+    </SettingRow>
+
+    {#if ["azure", "microsoftTranslator"].includes(ttsConfig.engine) && (currentVoice?.styles.length ?? 0) > 0}
+      <SettingRow compact={compact} label="Speaking Style">
+        <select
+          class="select select-sm w-52"
+          value={currentOptions().style}
+          onchange={(event) => updateOptions({ style: event.currentTarget.value, role: event.currentTarget.value ? currentOptions().role : "" })}
+        >
+          <option value="">Provider default</option>
+          {#each currentVoice?.styles ?? [] as style (style)}
+            <option value={style}>{style}</option>
+          {/each}
+        </select>
+      </SettingRow>
+      {#if currentOptions().style}
+        <SettingRow compact={compact} label="Style Degree">
+          <div class="flex w-56 items-center gap-3">
+            <input class="range range-xs flex-1" type="range" min="0.01" max="2" step="0.01" value={currentOptions().styleDegree} oninput={(event) => updateOptions({ styleDegree: Number(event.currentTarget.value) })} />
+            <span class="w-10 text-right text-xs tabular-nums">{Number(currentOptions().styleDegree).toFixed(2)}</span>
+          </div>
+        </SettingRow>
+        {#if (currentVoice?.roles.length ?? 0) > 0}
+          <SettingRow compact={compact} label="Speaking Role">
+            <select class="select select-sm w-52" value={currentOptions().role} onchange={(event) => updateOptions({ role: event.currentTarget.value })}>
+              <option value="">Provider default</option>
+              {#each currentVoice?.roles ?? [] as role (role)}
+                <option value={role}>{role}</option>
+              {/each}
+            </select>
+          </SettingRow>
+        {/if}
+      {/if}
+    {/if}
+
+    {#if ["azure", "microsoftTranslator"].includes(ttsConfig.engine)}
+      {#each pauseControls as pause (pause.key)}
+        <SettingRow compact={compact} label={pause.label}>
+          <label class="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              class="toggle toggle-sm toggle-primary"
+              checked={currentOptions()[pause.key] >= 0}
+              onchange={(event) => setPauseValue(pause.key, event.currentTarget.checked ? 300 : -1)}
+            />
+            {currentOptions()[pause.key] >= 0 ? String(currentOptions()[pause.key]) + " ms" : "Provider default"}
+          </label>
+        </SettingRow>
+        {#if currentOptions()[pause.key] >= 0}
+          <div class="flex items-center gap-3">
+            <input
+              class="range range-xs flex-1"
+              type="range"
+              min="0"
+              max="1000"
+              step="10"
+              value={currentOptions()[pause.key]}
+              oninput={(event) => setPauseValue(pause.key, Number(event.currentTarget.value))}
+            />
+            <span class="w-12 text-right text-xs tabular-nums">{currentOptions()[pause.key]} ms</span>
+          </div>
+        {/if}
+      {/each}
+    {/if}
+
+    {#if ["azure", "microsoftTranslator", "googleCloud", "openAi"].includes(ttsConfig.engine)}
+      <SettingRow compact={compact} label="Output Format">
+        <select class="select select-sm w-36" value={currentOptions().format} onchange={(event) => updateOptions({ format: event.currentTarget.value as "mp3" | "wav" })}>
+          <option value="mp3">MP3</option>
+          <option value="wav">WAV</option>
+        </select>
+      </SettingRow>
+    {/if}
+
+    {#if ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)}
+      <SettingRow compact={compact} label="Sample Rate">
+        <select class="select select-sm w-36" value={String(currentOptions().sampleRate)} onchange={(event) => updateOptions({ sampleRate: Number(event.currentTarget.value) as 16000 | 24000 | 48000 })}>
+          <option value="16000">16 kHz</option>
+          <option value="24000">24 kHz</option>
+          <option value="48000">48 kHz</option>
+        </select>
+      </SettingRow>
+    {/if}
+
+    {#if ttsConfig.engine === "googleCloud"}
+      <SettingRow compact={compact} label="Audio Profile">
+        <select class="select select-sm w-52" value={currentOptions().effectsProfile} onchange={(event) => updateOptions({ effectsProfile: event.currentTarget.value })}>
+          {#each audioProfiles as profile (profile.id)}
+            <option value={profile.id}>{profile.label}</option>
+          {/each}
+        </select>
+      </SettingRow>
+    {/if}
+  </SettingsSection>
+{/if}
+
 <SettingsSection compact={compact} title="Playback">
   <SettingRow compact={compact} label="Speech Rate">
     {#if ttsConfig.engine === "googleTranslate"}
