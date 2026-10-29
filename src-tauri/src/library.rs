@@ -384,7 +384,7 @@ fn copy_directory_once(source: &Path, destination: &Path) -> std::io::Result<()>
     }
 
     let name = destination.file_name().and_then(|value| value.to_str()).unwrap_or("assets");
-    let temporary = destination.with_file_name(format!("{name}.importing"));
+    let temporary = destination.with_file_name(format!("{name}.{}.importing", uuid::Uuid::new_v4()));
     if temporary.exists() {
         fs::remove_dir_all(&temporary)?;
     }
@@ -393,7 +393,14 @@ fn copy_directory_once(source: &Path, destination: &Path) -> std::io::Result<()>
         fs::remove_dir_all(&temporary)?;
         return Ok(());
     }
-    fs::rename(temporary, destination)
+    match fs::rename(&temporary, destination) {
+        Ok(()) => Ok(()),
+        Err(_) if destination.is_dir() => {
+            fs::remove_dir_all(&temporary)?;
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 // Copy original settings at launch, while keeping mutable library and asset data

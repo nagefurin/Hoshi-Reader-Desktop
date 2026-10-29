@@ -44,14 +44,11 @@ pub fn init_store() {
     // Seed the fork's independent credentials from the original installation once.
     // Sign-out or re-authentication in the fork will never delete the original tokens.
     for key in ["accessToken", "refreshToken", "clientId"] {
-        let target = entry(key);
-        if target.get_password().is_ok() {
-            continue;
-        }
         if let Ok(source) = keyring_core::Entry::new(ORIGINAL_SERVICE, key)
             && let Ok(password) = source.get_password()
         {
-            let _ = target.set_password(&password);
+            // Refresh the fork's copy from the original, never the other way around.
+            let _ = entry(key).set_password(&password);
         }
     }
 }
