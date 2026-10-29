@@ -4,6 +4,10 @@ run-name: Portable fork build (${{ github.ref_name }})
 on:
   workflow_dispatch:
 
+env:
+  HOSHI_GOOGLE_CLIENT_ID: ${{ secrets.HOSHI_GOOGLE_CLIENT_ID }}
+  HOSHI_GOOGLE_CLIENT_SECRET: ${{ secrets.HOSHI_GOOGLE_CLIENT_SECRET }}
+
 permissions:
   contents: read
 
@@ -42,9 +46,6 @@ jobs:
 
       - name: Build portable Windows executable
         run: pnpm tauri build --no-bundle --ci
-        env:
-          HOSHI_GOOGLE_CLIENT_ID: ${{ secrets.HOSHI_GOOGLE_CLIENT_ID }}
-          HOSHI_GOOGLE_CLIENT_SECRET: ${{ secrets.HOSHI_GOOGLE_CLIENT_SECRET }}
 
       - name: Stage portable executable
         shell: pwsh
