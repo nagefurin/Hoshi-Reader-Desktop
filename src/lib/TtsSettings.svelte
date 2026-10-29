@@ -133,7 +133,7 @@
 </SettingsSection>
 
 <SettingsSection title="Pronunciation Replacements">
-  <p class="mb-1 text-xs text-base-content/60">Rules are applied in order to the book text before it is spoken. Patterns are JavaScript regular expressions.</p>
+  <p class="mb-1 text-xs text-base-content/60">Rules are applied in order to the book text before it is spoken. Patterns are JavaScript regular expressions. Online providers receive the text being synthesized.</p>
   {#each ttsConfig.replacements as rule (rule.id)}
     <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
       <input class="input input-sm min-w-0" bind:value={rule.pattern} onchange={save} placeholder="Pattern (regex)" aria-label="Pronunciation pattern" />
