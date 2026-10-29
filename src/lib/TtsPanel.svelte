@@ -207,6 +207,7 @@
       ttsConfig.azureVoice, ttsConfig.azureDialogueVoice, ttsConfig.microsoftTranslatorVoice,
       ttsConfig.microsoftTranslatorDialogueVoice, ttsConfig.googleCloudVoice,
       ttsConfig.googleCloudDialogueVoice, ttsConfig.remoteVoice, ttsConfig.remoteDialogueVoice,
+      ttsConfig.providerOptions[ttsConfig.engine],
       ttsRuntime.apiKey, ttsRuntime.azureKey, ttsRuntime.googleCloudKey,
     ]);
   }
@@ -232,6 +233,7 @@
       voice: synthesisVoice(segment),
       rate: Number(ttsConfig.rate) || 1,
       pitch: Number(ttsConfig.pitch) || 0,
+      options: ttsConfig.providerOptions[ttsConfig.engine],
     }).catch((error) => {
       if (audioCache.get(segmentIndex)?.promise === promise) audioCache.delete(segmentIndex);
       throw error;
@@ -377,7 +379,11 @@
     try {
       const encoded = await synthesizedAudio(segmentIndex);
       if (token !== runId) return;
-      const audio = new Audio("data:audio/mpeg;base64," + encoded);
+      const audioFormat = ["azure", "microsoftTranslator", "googleCloud", "openAi"].includes(ttsConfig.engine)
+        ? ttsConfig.providerOptions[ttsConfig.engine]?.format ?? "mp3"
+        : "mp3";
+      const mimeType = audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
+      const audio = new Audio("data:" + mimeType + ";base64," + encoded);
       audio.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
       audio.playbackRate = Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
       audio.onended = () => {
