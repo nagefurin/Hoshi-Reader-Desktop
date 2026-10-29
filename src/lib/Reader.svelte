@@ -131,6 +131,20 @@
   let bookDeleted = false;
   let applyingBookmark = false;
   let fullscreen = $state(false);
+  type TtsControlApi = {
+    previous: () => void;
+    next: () => void;
+    repeat: () => void;
+    togglePlayback: () => void;
+  };
+  let ttsControlApi = $state<TtsControlApi | null>(null);
+  let ttsSessionActive = $state(false);
+  let ttsPlaying = $state(false);
+
+  function registerTtsControls(api: TtsControlApi | null) {
+    ttsControlApi = api;
+  }
+
   let readerPanel = $state<"Chapters" | "Search" | "Highlights" | "Appearance" | "Sasayaki" | "TTS" | null>(null);
   let leftPanel = $state<typeof readerPanel>(null);
   let rightPanel = $state<typeof readerPanel>(null);
@@ -737,9 +751,10 @@
       () => applyingBookmark,
     ))();
   const transportVisible = $derived(
-    sasayakiConfig.enableSasayaki &&
-      sasayakiConfig.sasayakiShowControlBar &&
-      (sasayaki?.hasAudio ?? false),
+    ttsSessionActive ||
+      (sasayakiConfig.enableSasayaki &&
+        sasayakiConfig.sasayakiShowControlBar &&
+        (sasayaki?.hasAudio ?? false)),
   );
 
   let statsDialog = $state<HTMLDialogElement>();
@@ -1416,10 +1431,19 @@
     if (key === "F11") toggleFullscreen();
     else if (key === hotkeyConfig.toggleTracking) toggleTracking();
     else if (key === hotkeyConfig.manualBookmark) postToFrame({ hoshi: "bookmark-mode" });
-    else if (key === hotkeyConfig.sasayakiPlayback) toggleSasayakiPlayback();
-    else if (key === hotkeyConfig.sasayakiPreviousCue) sasayaki?.prevCue();
-    else if (key === hotkeyConfig.sasayakiNextCue) sasayaki?.nextCue();
-    else if (key === hotkeyConfig.sasayakiRepeatCue) sasayaki?.repeatCue();
+    else if (key === hotkeyConfig.sasayakiPlayback) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.togglePlayback();
+      else toggleSasayakiPlayback();
+    } else if (key === hotkeyConfig.sasayakiPreviousCue) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.previous();
+      else sasayaki?.prevCue();
+    } else if (key === hotkeyConfig.sasayakiNextCue) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.next();
+      else sasayaki?.nextCue();
+    } else if (key === hotkeyConfig.sasayakiRepeatCue) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.repeat();
+      else sasayaki?.repeatCue();
+    }
     else if (key === hotkeyConfig.mineEntry1) popupViews[popups.length - 1]?.entryAction("mine", 0);
     else if (key === hotkeyConfig.mineEntry2) popupViews[popups.length - 1]?.entryAction("mine", 1);
     else if (key === hotkeyConfig.mineEntry3) popupViews[popups.length - 1]?.entryAction("mine", 2);
@@ -1895,7 +1919,7 @@
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS'
             ? 'btn-active text-primary'
             : 'text-base-content/60'}"
-          title="Text-to-Speech"
+          title="TTS"
           onclick={() => openReaderPanel(readerPanel === "TTS" ? null : "TTS")}
         >
           <Volume2 class="size-4" />
@@ -2069,6 +2093,31 @@
       </div>
     {/snippet}
 
+    {#snippet ttsTransport()}
+      <div
+        class="absolute bottom-0 left-1/2 z-20 flex w-max max-w-full -translate-x-1/2 items-center justify-center gap-1 py-1.5 text-xs opacity-55 transition-opacity duration-200 hover:opacity-100"
+        style={readerInfo ? `color: ${readerInfo}` : ""}
+      >
+        <div class="flex items-center gap-1 {vertical ? '-scale-x-100' : ''}">
+          {@render transportButton(RotateCcw, () => ttsControlApi?.repeat())}
+          {@render transportButton(Rewind, () => ttsControlApi?.previous())}
+          <button
+            class="flex size-5 items-center justify-center rounded hover:bg-current/10 {vertical ? '-scale-x-100' : ''}"
+            title={ttsPlaying ? "Pause TTS" : "Play TTS"}
+            onclick={() => ttsControlApi?.togglePlayback()}
+          >
+            {#if ttsPlaying}
+              <Pause class="size-3.5" fill="currentColor" />
+            {:else}
+              <Play class="size-3.5" fill="currentColor" />
+            {/if}
+          </button>
+          {@render transportButton(FastForward, () => ttsControlApi?.next())}
+        </div>
+        <span class="ml-1 whitespace-nowrap text-[10px] font-medium">TTS</span>
+      </div>
+    {/snippet}
+
     {#snippet transport(player: SasayakiPlayer)}
       {@const percent = player.duration ? (player.currentTime / player.duration) * 100 : 0}
       <div
@@ -2146,7 +2195,9 @@
       </div>
     {/if}
 
-    {#if transportVisible && sasayaki}
+    {#if ttsSessionActive && ttsControlApi}
+      {@render ttsTransport()}
+    {:else if transportVisible && sasayaki}
       {@render transport(sasayaki)}
     {/if}
 
@@ -2403,6 +2454,9 @@
             currentChapterIndex={index}
             lookupActive={popups.length > 0}
             continuousMode={continuous}
+            bind:sessionActive={ttsSessionActive}
+            bind:playing={ttsPlaying}
+            onControlApi={registerTtsControls}
             onReadSegment={onTtsReadSegment}
             onHoldImages={holdTtsImages}
             onClearHighlight={clearTtsHighlight}
