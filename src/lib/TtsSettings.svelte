@@ -108,7 +108,7 @@
       <p class="text-xs text-base-content/60">No system voices have been listed yet. Install a voice for your language in the operating system's speech settings.</p>
     {/if}
   {:else if ttsConfig.engine === "edge"}
-    <SettingRow compact={compact} label="Japanese Voice">
+    <SettingRow compact={compact} label="Narration Voice">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.edgeVoice} onchange={save}>
           {#if edgeVoices.length === 0}
@@ -122,6 +122,14 @@
           {edgeVoiceLoading ? "Loading…" : "Refresh"}
         </button>
       </div>
+    </SettingRow>
+    <SettingRow compact={compact} label="Dialogue Voice">
+      <select class="select select-sm w-52" bind:value={ttsConfig.edgeDialogueVoice} onchange={save}>
+        <option value="">Same as narration</option>
+        {#each edgeVoices as voice (voice)}
+          <option value={voice}>{voice}</option>
+        {/each}
+      </select>
     </SettingRow>
     {#if edgeVoiceError}
       <p class="text-xs text-error">{edgeVoiceError}</p>
@@ -144,8 +152,11 @@
       <SettingRow compact={compact} label="Model">
         <input class="input input-sm w-52" bind:value={ttsConfig.model} onchange={save} placeholder="tts-1" />
       </SettingRow>
-      <SettingRow compact={compact} label="Voice">
+      <SettingRow compact={compact} label="Narration Voice">
         <input class="input input-sm w-52" bind:value={ttsConfig.remoteVoice} onchange={save} placeholder="alloy" />
+      </SettingRow>
+      <SettingRow compact={compact} label="Dialogue Voice">
+        <input class="input input-sm w-52" bind:value={ttsConfig.remoteDialogueVoice} onchange={save} placeholder="Same as narration" />
       </SettingRow>
     {:else}
       <SettingRow compact={compact} label="VITS Model">
@@ -189,6 +200,12 @@
       </div>
     </SettingRow>
   {/if}
+  <SettingRow compact={compact} label="Playback Speed">
+    <div class="flex w-56 items-center gap-3">
+      <input class="range range-xs flex-1" type="range" min="0.5" max="3" step="0.1" bind:value={ttsConfig.playbackRate} oninput={save} />
+      <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.playbackRate).toFixed(1)}x</span>
+    </div>
+  </SettingRow>
   <SettingRow compact={compact} label="Volume">
     <div class="flex w-56 items-center gap-3">
       <input class="range range-xs flex-1" type="range" min="0" max="1" step="0.05" bind:value={ttsConfig.volume} oninput={save} />
