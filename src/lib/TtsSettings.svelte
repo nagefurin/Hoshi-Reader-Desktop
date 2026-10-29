@@ -27,7 +27,8 @@
     const previous = ttsConfig.engine;
     const next = value as TtsEngine;
     if (next === "edge" && previous !== "edge") ttsConfig.pitch = 0;
-    if (next !== "edge" && previous === "edge") ttsConfig.pitch = 1;
+    else if (["azure", "microsoftTranslator", "googleCloud"].includes(next) && previous !== next) ttsConfig.pitch = 0;
+    else if (next === "device" && previous !== "device") ttsConfig.pitch = 1;
     ttsConfig.engine = next;
     saveTtsConfig();
   }
@@ -305,25 +306,44 @@
 
 <SettingsSection compact={compact} title="Playback">
   <SettingRow compact={compact} label="Speech Rate">
-    <div class="flex w-56 items-center gap-3">
-      <input class="range range-xs flex-1" type="range" min="0.5" max="3" step="0.1" bind:value={ttsConfig.rate} oninput={save} />
-      <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.rate).toFixed(1)}x</span>
-    </div>
-  </SettingRow>
-  {#if ttsConfig.engine === "device" || ttsConfig.engine === "edge"}
-    <SettingRow compact={compact} label={ttsConfig.engine === "edge" ? "Pitch (Hz)" : "Pitch"}>
+    {#if ttsConfig.engine === "googleTranslate"}
+      <select class="select select-sm w-36" value={Number(ttsConfig.rate) < 0.75 ? "slow" : "normal"} onchange={(event) => { ttsConfig.rate = event.currentTarget.value === "slow" ? 0.5 : 1; save(); }}>
+        <option value="normal">Normal</option>
+        <option value="slow">Slow</option>
+      </select>
+    {:else}
       <div class="flex w-56 items-center gap-3">
         <input
           class="range range-xs flex-1"
           type="range"
-          min={ttsConfig.engine === "edge" ? -50 : 0.5}
-          max={ttsConfig.engine === "edge" ? 50 : 2}
-          step={ttsConfig.engine === "edge" ? 1 : 0.1}
+          min={ttsConfig.engine === "googleCloud" ? 0.25 : 0.5}
+          max={["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine) ? 2 : 3}
+          step={0.1}
+          bind:value={ttsConfig.rate}
+          oninput={save}
+        />
+        <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.rate).toFixed(1)}x</span>
+      </div>
+    {/if}
+  </SettingRow>
+  {#if ["device", "edge", "azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)}
+    <SettingRow compact={compact} label={ttsConfig.engine === "edge" ? "Pitch (Hz)" : ttsConfig.engine === "device" ? "Pitch" : "Pitch (semitones)"}>
+      <div class="flex w-56 items-center gap-3">
+        <input
+          class="range range-xs flex-1"
+          type="range"
+          min={ttsConfig.engine === "edge" ? -50 : ttsConfig.engine === "device" ? 0.5 : ["googleCloud"].includes(ttsConfig.engine) ? -20 : -12}
+          max={ttsConfig.engine === "edge" ? 50 : ttsConfig.engine === "device" ? 2 : ttsConfig.engine === "googleCloud" ? 20 : 7}
+          step={ttsConfig.engine === "edge" ? 1 : ttsConfig.engine === "device" ? 0.1 : 1}
           bind:value={ttsConfig.pitch}
           oninput={save}
         />
-        <span class="w-10 text-right text-xs tabular-nums">
-          {ttsConfig.engine === "edge" ? `${Number(ttsConfig.pitch) > 0 ? "+" : ""}${Number(ttsConfig.pitch).toFixed(0)} Hz` : Number(ttsConfig.pitch).toFixed(1)}
+        <span class="w-12 text-right text-xs tabular-nums">
+          {ttsConfig.engine === "edge"
+            ? `${Number(ttsConfig.pitch) > 0 ? "+" : ""}${Number(ttsConfig.pitch).toFixed(0)} Hz`
+            : ttsConfig.engine === "device"
+              ? Number(ttsConfig.pitch).toFixed(1)
+              : `${Number(ttsConfig.pitch) > 0 ? "+" : ""}${Number(ttsConfig.pitch).toFixed(0)} st`}
         </span>
       </div>
     </SettingRow>
@@ -340,10 +360,10 @@
       <span class="w-10 text-right text-xs tabular-nums">{Math.round(Number(ttsConfig.volume) * 100)}%</span>
     </div>
   </SettingRow>
-  <SettingRow compact={compact} label="Dialogue Voice">
-    <input class="toggle toggle-sm toggle-primary" type="checkbox" bind:checked={ttsConfig.splitDialogue} onchange={save} disabled={ttsConfig.engine !== "device"} />
+  <SettingRow compact={compact} label="Separate Dialogue Voice">
+    <input class="toggle toggle-sm toggle-primary" type="checkbox" bind:checked={ttsConfig.splitDialogue} onchange={save} disabled={ttsConfig.engine === "googleTranslate"} />
   </SettingRow>
-  <SettingRow compact={compact} label="Use Furigana Readings">
+  <SettingRow compact={compact} label="Use Ruby Readings">
     <input class="toggle toggle-sm toggle-primary" type="checkbox" bind:checked={ttsConfig.useRubyReadings} onchange={save} />
   </SettingRow>
   <p class="text-xs text-base-content/60">Dialogue splitting uses Japanese quote marks and routes quoted text to the optional dialogue voice. Furigana readings replace ruby text where EPUB markup provides an rt reading.</p>
@@ -362,23 +382,25 @@
     bind:checked={sasayakiConfig.sasayakiAutoPause}
     onchange={saveSasayakiConfig}
   />
-  <SettingToggle
-    label="Image Hold"
-    {compact}
-    bind:checked={sasayakiConfig.sasayakiImagePause}
-    onchange={saveSasayakiConfig}
-  />
-  {#if sasayakiConfig.sasayakiImagePause}
-    <SettingStepper
-      label="Image Hold Duration"
-      {compact}
-      bind:value={sasayakiConfig.sasayakiImagePauseDuration}
-      suffix="s"
-      min={1}
-      max={30}
-      onchange={saveSasayakiConfig}
-    />
-  {/if}
+  <SettingRow compact={compact} label="Image Hold">
+    <div class="flex w-56 items-center gap-3">
+      <input
+        class="range range-xs flex-1"
+        type="range"
+        min="0"
+        max="5"
+        step="0.5"
+        value={sasayakiConfig.sasayakiImagePause ? Math.min(5, Math.max(0, Number(sasayakiConfig.sasayakiImagePauseDuration) || 0)) : 0}
+        oninput={(event) => {
+          const seconds = Number(event.currentTarget.value);
+          sasayakiConfig.sasayakiImagePauseDuration = seconds;
+          sasayakiConfig.sasayakiImagePause = seconds > 0;
+          saveSasayakiConfig();
+        }}
+      />
+      <span class="w-12 text-right text-xs tabular-nums">{sasayakiConfig.sasayakiImagePause ? `${Number(sasayakiConfig.sasayakiImagePauseDuration).toFixed(1)}s` : "Off"}</span>
+    </div>
+  </SettingRow>
   <p class="text-xs text-base-content/60">Auto-scroll follows the sentence being read. Image hold pauses speech on illustrated pages; auto-scroll must be enabled for image holds to run.</p>
 </SettingsSection>
 
