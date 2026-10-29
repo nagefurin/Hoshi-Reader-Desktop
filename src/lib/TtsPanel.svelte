@@ -12,6 +12,7 @@
     text: string;
     rubyText: string;
     imageOffsets: number[];
+    imageIndexStart: number;
   };
 
   type SpokenSegment = {
@@ -28,6 +29,7 @@
     title,
     currentChapterIndex,
     lookupActive = false,
+    continuousMode = false,
     onReadSegment,
     onClearHighlight,
   }: {
@@ -35,6 +37,7 @@
     title: string;
     currentChapterIndex: number;
     lookupActive?: boolean;
+    continuousMode?: boolean;
     onReadSegment: (spineIndex: number, sourceText: string, imagesBefore: number[]) => Promise<void>;
     onClearHighlight: () => void;
   } = $props();
@@ -161,7 +164,7 @@
               const sourceCodePointStart = Array.from(sourceText.slice(0, sourceStart)).length;
               const imagesBefore: number[] = [];
               while (imageCursor < imageOffsets.length && imageOffsets[imageCursor] <= sourceCodePointStart) {
-                imagesBefore.push(imageCursor);
+                imagesBefore.push(continuousMode ? (chapter.imageIndexStart + imageCursor) : imageCursor);
                 imageCursor++;
               }
 
