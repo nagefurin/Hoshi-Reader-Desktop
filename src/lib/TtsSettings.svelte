@@ -3,6 +3,9 @@
   import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsEngine } from "./ttsConfig.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
+  import SettingToggle from "./SettingToggle.svelte";
+  import SettingStepper from "./SettingStepper.svelte";
+  import { sasayakiConfig, saveSasayakiConfig } from "./sasayakiConfig.svelte";
 
   let { compact = false }: { compact?: boolean } = $props();
 
@@ -199,6 +202,39 @@
     <input class="toggle toggle-sm toggle-primary" type="checkbox" bind:checked={ttsConfig.useRubyReadings} onchange={save} />
   </SettingRow>
   <p class="text-xs text-base-content/60">Dialogue splitting uses Japanese quote marks and routes quoted text to the optional dialogue voice. Furigana readings replace ruby text where EPUB markup provides an rt reading.</p>
+</SettingsSection>
+
+<SettingsSection compact={compact} title="Reader Playback">
+  <SettingToggle
+    label="Reader Auto-Scroll"
+    {compact}
+    bind:checked={sasayakiConfig.sasayakiAutoScroll}
+    onchange={saveSasayakiConfig}
+  />
+  <SettingToggle
+    label="Auto-Pause on Lookup"
+    {compact}
+    bind:checked={sasayakiConfig.sasayakiAutoPause}
+    onchange={saveSasayakiConfig}
+  />
+  <SettingToggle
+    label="Image Hold"
+    {compact}
+    bind:checked={sasayakiConfig.sasayakiImagePause}
+    onchange={saveSasayakiConfig}
+  />
+  {#if sasayakiConfig.sasayakiImagePause}
+    <SettingStepper
+      label="Image Hold Duration"
+      {compact}
+      bind:value={sasayakiConfig.sasayakiImagePauseDuration}
+      suffix="s"
+      min={1}
+      max={30}
+      onchange={saveSasayakiConfig}
+    />
+  {/if}
+  <p class="text-xs text-base-content/60">Auto-scroll follows the sentence being read. Image hold pauses speech on illustrated pages; auto-scroll must be enabled for image holds to run.</p>
 </SettingsSection>
 
 <SettingsSection compact={compact} title="Pronunciation Replacements">
