@@ -20,6 +20,8 @@ export type TtsConfig = {
   model: string;
   remoteVoice: string;
   edgeVoice: string;
+  edgeDialogueVoice: string;
+  remoteDialogueVoice: string;
   vitsModel: "vits" | "w2v2-vits" | "bert-vits2" | "gpt-sovits";
   speakerId: number;
   replacements: TtsReplacement[];
@@ -30,7 +32,7 @@ const defaults: TtsConfig = {
   voice: "",
   dialogueVoice: "",
   splitDialogue: true,
-  useRubyReadings: false,
+  useRubyReadings: true,
   rate: 1,
   pitch: 1,
   volume: 1,
@@ -38,6 +40,8 @@ const defaults: TtsConfig = {
   model: "tts-1",
   remoteVoice: "alloy",
   edgeVoice: "ja-JP-NanamiNeural",
+  edgeDialogueVoice: "",
+  remoteDialogueVoice: "",
   vitsModel: "vits",
   speakerId: 0,
   replacements: [],
