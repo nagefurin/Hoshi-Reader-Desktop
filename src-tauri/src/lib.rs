@@ -45,6 +45,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                .with_filename(".window-state-nagefurin-fork.json")
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         & !tauri_plugin_window_state::StateFlags::VISIBLE,
@@ -204,6 +205,7 @@ pub fn run() {
             updater::install_update
         ])
         .setup(|app| {
+            library::import_original_settings(app.handle())?;
             #[cfg(windows)]
             media_controls::set_app_id(&app.config().identifier).ok();
             let builder = tauri::WebviewWindowBuilder::from_config(

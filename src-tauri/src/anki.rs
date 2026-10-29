@@ -122,7 +122,7 @@ fn default_audio_volume() -> f64 {
 }
 
 fn config_path(app: &AppHandle) -> PathBuf {
-    let dir = app.path().app_data_dir().unwrap();
+    let dir = library::app_dir(app);
     fs::create_dir_all(&dir).unwrap();
     dir.join("anki_config.json")
 }

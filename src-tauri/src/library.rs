@@ -331,7 +331,55 @@ pub fn ms_to_apple(ms: i64) -> f64 {
 }
 
 pub(crate) fn app_dir(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir().unwrap()
+    #[cfg(windows)]
+    {
+        // Store the fork's native data beside the portable EXE when writable.
+        if let Ok(executable) = std::env::current_exe()
+            && let Some(parent) = executable.parent()
+        {
+            let portable_dir = parent.join("Hoshi-Reader-Fork-data");
+            if fs::create_dir_all(&portable_dir).is_ok() {
+                return portable_dir;
+            }
+        }
+
+        // Fall back to a distinct per-fork directory if the EXE's folder is read-only.
+        let fallback_dir = app.path().app_data_dir().unwrap().join("NagefurinFork");
+        fs::create_dir_all(&fallback_dir).unwrap();
+        fallback_dir
+    }
+    #[cfg(not(windows))]
+    {
+        app.path().app_data_dir().unwrap()
+    }
+}
+
+// Copy only compatible native settings. Library data and the Google Drive cache
+// must remain independent so the original app and fork can run at the same time.
+pub(crate) fn import_original_settings(app: &AppHandle) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        let original_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(std::io::Error::other)?;
+        let fork_dir = app_dir(app);
+        if original_dir != fork_dir {
+            let source = original_dir.join("anki_config.json");
+            if source.is_file() {
+                let contents = fs::read(&source)?;
+                // Don't replace a working fork config with a partial/corrupt source file.
+                if serde_json::from_slice::<serde_json::Value>(&contents).is_ok() {
+                    fs::write(fork_dir.join("anki_config.json"), contents)?;
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
+    Ok(())
 }
 
 pub(crate) fn books_dir(app: &AppHandle) -> PathBuf {

@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Hoshi Reader",
+  "productName": "Hoshi Reader Fork",
   "identifier": "de.manhhao.hoshi",
   "build": {
     "frontendDist": "../dist",
@@ -12,7 +12,7 @@
     "windows": [
       {
         "create": false,
-        "title": "Hoshi Reader",
+        "title": "Hoshi Reader (Nagefurin Fork)",
         "theme": "Light",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,

@@ -1,12 +1,6 @@
 name: Windows build
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -44,14 +38,20 @@ jobs:
       - name: Check frontend
         run: pnpm check
 
-      - name: Build Windows installer
-        shell: bash
-        run: pnpm tauri build --no-sign --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Build portable Windows executable
+        run: pnpm tauri build --no-bundle --ci
+        env:
+          HOSHI_GOOGLE_CLIENT_ID: ${{ secrets.HOSHI_GOOGLE_CLIENT_ID }}
+          HOSHI_GOOGLE_CLIENT_SECRET: ${{ secrets.HOSHI_GOOGLE_CLIENT_SECRET }}
 
-      - name: Upload Windows installer
+      - name: Stage portable executable
+        shell: pwsh
+        run: Copy-Item "src-tauri/target/release/hoshi-reader.exe" "Hoshi-Reader-Fork.exe"
+
+      - name: Upload portable executable
         uses: actions/upload-artifact@v6
         with:
-          name: hoshi-reader-windows-installer
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          name: Hoshi-Reader-Fork-Portable
+          path: Hoshi-Reader-Fork.exe
           if-no-files-found: error
           retention-days: 14
