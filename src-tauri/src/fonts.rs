@@ -15,7 +15,7 @@ pub struct FontInfo {
 }
 
 fn fonts_dir(app: &AppHandle) -> PathBuf {
-    let dir = app.path().app_data_dir().unwrap().join(FONTS_DIR);
+    let dir = crate::library::app_dir(app).join(FONTS_DIR);
     fs::create_dir_all(&dir).unwrap();
     dir
 }

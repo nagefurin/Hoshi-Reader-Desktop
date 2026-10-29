@@ -331,11 +331,243 @@ pub fn ms_to_apple(ms: i64) -> f64 {
 }
 
 pub(crate) fn app_dir(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir().unwrap()
+    #[cfg(windows)]
+    {
+        // Store the fork's native data beside the portable EXE when writable.
+        if let Ok(executable) = std::env::current_exe()
+            && let Some(parent) = executable.parent()
+        {
+            let portable_dir = parent.join("Hoshi-Reader-Fork-data");
+            if fs::create_dir_all(&portable_dir).is_ok() {
+                return portable_dir;
+            }
+        }
+
+        // Fall back to a distinct per-fork directory if the EXE's folder is read-only.
+        let fallback_dir = app.path().app_data_dir().unwrap().join("NagefurinFork");
+        fs::create_dir_all(&fallback_dir).unwrap();
+        fallback_dir
+    }
+    #[cfg(not(windows))]
+    {
+        app.path().app_data_dir().unwrap()
+    }
+}
+
+// Copy a directory into a temporary sibling, then rename it into place so an
+// interrupted first launch does not leave an incomplete portable asset folder.
+fn copy_directory_contents(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            copy_directory_contents(&source_path, &destination_path)?;
+        } else if kind.is_file() {
+            fs::copy(&source_path, &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_directory_once(source: &Path, destination: &Path) -> std::io::Result<()> {
+    if destination.is_dir() || !source.is_dir() {
+        return Ok(());
+    }
+    if destination.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "Portable asset destination exists but is not a directory",
+        ));
+    }
+
+    let name = destination.file_name().and_then(|value| value.to_str()).unwrap_or("assets");
+    let temporary = destination.with_file_name(format!("{name}.{}.importing", uuid::Uuid::new_v4()));
+    if temporary.exists() {
+        fs::remove_dir_all(&temporary)?;
+    }
+    copy_directory_contents(source, &temporary)?;
+    if destination.exists() {
+        fs::remove_dir_all(&temporary)?;
+        return Ok(());
+    }
+    match fs::rename(&temporary, destination) {
+        Ok(()) => Ok(()),
+        Err(_) if destination.is_dir() => {
+            fs::remove_dir_all(&temporary)?;
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+// Copy original settings at launch, while keeping mutable library and asset data
+// independent so the original app and fork can run side by side.
+pub(crate) fn import_original_settings(app: &AppHandle) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        let original_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(std::io::Error::other)?;
+        let fork_dir = app_dir(app);
+        if original_dir != fork_dir {
+            // Seed local dictionary/font assets once. Updates and deletions from the
+            // fork then affect only its portable data folder.
+            copy_directory_once(&original_dir.join("Dictionaries"), &fork_dir.join("Dictionaries"))?;
+            copy_directory_once(&original_dir.join("Fonts"), &fork_dir.join("Fonts"))?;
+
+            let source = original_dir.join("anki_config.json");
+            if source.is_file() {
+                let contents = fs::read(&source)?;
+                // Don't replace a working fork config with a partial/corrupt source file.
+                if serde_json::from_slice::<serde_json::Value>(&contents).is_ok() {
+                    fs::write(fork_dir.join("anki_config.json"), contents)?;
+                }
+            }
+
+            // Dictionary selections/order are settings; the actual dictionary assets
+            // remain in the original shared directory so both apps can read them.
+            let original_dict_settings = original_dir.join("Dictionaries");
+            let fork_dict_settings = fork_dir.join("DictionarySettings");
+            for name in ["config.json", "collapsed.json"] {
+                let source = original_dict_settings.join(name);
+                if source.is_file() {
+                    let contents = fs::read(&source)?;
+                    if serde_json::from_slice::<serde_json::Value>(&contents).is_ok() {
+                        fs::create_dir_all(&fork_dict_settings)?;
+                        fs::write(fork_dict_settings.join(name), contents)?;
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
+    Ok(())
+}
+
+/// Shared user data root used by upstream Hoshi Reader on Windows.
+/// Book files/bookmarks are shared; fork preferences and non-book assets remain separate.
+pub(crate) fn shared_data_dir(app: &AppHandle) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .or_else(|| app.path().app_data_dir().ok())
+            .unwrap_or_else(|| std::env::temp_dir());
+        root.join("hoshi-reader")
+    }
+    #[cfg(not(windows))]
+    {
+        app.path().app_data_dir().unwrap()
+    }
+}
+
+fn find_book_by_id(root: &Path, id: &str) -> Option<PathBuf> {
+    fs::read_dir(root).ok()?.filter_map(Result::ok).map(|entry| entry.path())
+        .find(|path| {
+            path.is_dir() && read_json::<BookMetadata>(&path.join(METADATA_FILE))
+                .is_some_and(|metadata| metadata.id == id)
+        })
+}
+
+fn merge_legacy_book_files(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            merge_legacy_book_files(&source_path, &destination_path)?;
+            continue;
+        }
+        if !kind.is_file() {
+            continue;
+        }
+        if !destination_path.exists() {
+            fs::copy(&source_path, &destination_path)?;
+        } else if entry.file_name().to_string_lossy() == BOOKMARK_FILE {
+            let source_bookmark = read_json::<Bookmark>(&source_path);
+            let destination_bookmark = read_json::<Bookmark>(&destination_path);
+            let source_modified = source_bookmark.as_ref().and_then(|bookmark| bookmark.last_modified)
+                .unwrap_or(DISTANT_PAST);
+            let destination_modified = destination_bookmark.as_ref().and_then(|bookmark| bookmark.last_modified)
+                .unwrap_or(DISTANT_PAST);
+            if source_modified > destination_modified {
+                fs::copy(&source_path, &destination_path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Import data created by older portable fork builds into the shared book library.
+/// Existing upstream book IDs are retained and their bookmarks are merged conservatively.
+pub(crate) fn import_portable_books(app: &AppHandle) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        let shared_books = shared_data_dir(app).join(BOOKS_DIR);
+        fs::create_dir_all(&shared_books)?;
+        let mut legacy_roots = Vec::new();
+        if let Ok(executable) = std::env::current_exe()
+            && let Some(parent) = executable.parent()
+        {
+            legacy_roots.push(parent.join("Hoshi-Reader-Fork-data").join(BOOKS_DIR));
+        }
+        if let Ok(original_app_dir) = app.path().app_data_dir() {
+            legacy_roots.push(original_app_dir.join("NagefurinFork").join(BOOKS_DIR));
+        }
+
+        for legacy_root in legacy_roots {
+            if !legacy_root.is_dir() || legacy_root == shared_books {
+                continue;
+            }
+            for entry in fs::read_dir(&legacy_root)? {
+                let entry = entry?;
+                let source = entry.path();
+                if !source.is_dir() {
+                    continue;
+                }
+                let Some(metadata) = read_json::<BookMetadata>(&source.join(METADATA_FILE)) else {
+                    continue;
+                };
+                if let Some(existing) = find_book_by_id(&shared_books, &metadata.id) {
+                    merge_legacy_book_files(&source, &existing)?;
+                    continue;
+                }
+
+                let original_name = entry.file_name().to_string_lossy().into_owned();
+                let mut target_name = original_name.clone();
+                let mut suffix = 2usize;
+                while shared_books.join(&target_name).exists() {
+                    target_name = format!("{original_name}-nagefurin-{suffix}");
+                    suffix += 1;
+                }
+                let destination = shared_books.join(&target_name);
+                copy_directory_contents(&source, &destination)?;
+                if let Some(mut imported) = read_json::<BookMetadata>(&destination.join(METADATA_FILE)) {
+                    imported.folder = target_name;
+                    write_json(&destination.join(METADATA_FILE), &imported)
+                        .map_err(std::io::Error::other)?;
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
+    Ok(())
 }
 
 pub(crate) fn books_dir(app: &AppHandle) -> PathBuf {
-    let dir = app_dir(app).join(BOOKS_DIR);
+    let dir = shared_data_dir(app).join(BOOKS_DIR);
     fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -432,8 +664,16 @@ pub(crate) fn cover_url(app: &AppHandle, book: &BookMetadata) -> Option<PathBuf>
     if cover.starts_with('/') {
         return Some(PathBuf::from(cover));
     }
-    let app_dir = app_dir(app);
-    Some(find_path(&app_dir, cover).unwrap_or_else(|| app_dir.join(cover)))
+
+    // Book cover paths are stored relative to the shared data root (for example,
+    // "Books/<book folder>/cover.jpg"), not the fork's portable asset directory.
+    // Fall back to the old portable root for covers created by earlier fork builds.
+    let shared_dir = shared_data_dir(app);
+    Some(
+        find_path(&shared_dir, cover)
+            .or_else(|| find_path(&app_dir(app), cover))
+            .unwrap_or_else(|| shared_dir.join(cover)),
+    )
 }
 
 pub(crate) fn find_path(directory: &Path, path: &str) -> Option<PathBuf> {
@@ -467,7 +707,9 @@ pub(crate) fn cover_bytes(app: &AppHandle, id: &str) -> Option<(Vec<u8>, String)
 
 pub(crate) fn cover_path(app: &AppHandle, id: &str) -> Option<PathBuf> {
     let metadata = load_metadata(app, id)?;
-    let path = find_path(&app_dir(app), &metadata.cover?)?;
+    let cover = metadata.cover?;
+    let path = find_path(&shared_data_dir(app), &cover)
+        .or_else(|| find_path(&app_dir(app), &cover))?;
     path.is_file().then_some(path)
 }
 

@@ -1,4 +1,5 @@
 import type { BookMetadata, SortOption } from "./types";
+import { loadForkPreference, saveForkPreference } from "./forkStorage";
 
 const KEY = "bookshelfSortOption";
 const CUSTOM_KEY = "bookshelfCustomShelves";
@@ -6,22 +7,22 @@ const REVERSED_KEY = "bookshelfSortReversed";
 
 function storedCustomShelves() {
   try {
-    return JSON.parse(localStorage.getItem(CUSTOM_KEY) ?? "[]") as string[];
+    return JSON.parse(loadForkPreference(CUSTOM_KEY) ?? "[]") as string[];
   } catch {
     return [];
   }
 }
 
-const storedOption = localStorage.getItem(KEY);
+const storedOption = loadForkPreference(KEY);
 
 export const bookSort = $state<{ option: SortOption; reversed: boolean; customShelves: string[] }>({
   option: storedOption === "Title" || storedOption === "Progress" || storedOption === "Time Read" ? storedOption : "Recent",
-  reversed: localStorage.getItem(REVERSED_KEY) === "true",
+  reversed: loadForkPreference(REVERSED_KEY) === "true",
   customShelves: storedCustomShelves(),
 });
 
 function saveCustomShelves() {
-  localStorage.setItem(CUSTOM_KEY, JSON.stringify(bookSort.customShelves));
+  saveForkPreference(CUSTOM_KEY, JSON.stringify(bookSort.customShelves));
 }
 
 export function sortOption(shelf: string | null): SortOption {
@@ -40,13 +41,13 @@ export function setBookSort(option: SortOption, shelf: string | null) {
   }
   bookSort.option = option;
   bookSort.reversed = false;
-  localStorage.setItem(KEY, option);
-  localStorage.setItem(REVERSED_KEY, "false");
+  saveForkPreference(KEY, option);
+  saveForkPreference(REVERSED_KEY, "false");
 }
 
 export function reverseBookSort() {
   bookSort.reversed = !bookSort.reversed;
-  localStorage.setItem(REVERSED_KEY, String(bookSort.reversed));
+  saveForkPreference(REVERSED_KEY, String(bookSort.reversed));
 }
 
 export function clearCustomShelf(shelf: string) {
@@ -87,4 +88,15 @@ export function sortBooks(
     }
   });
   return reversed ? sorted.reverse() : sorted;
+}
+
+function refreshBookSortFromForkFile() {
+  const option = loadForkPreference(KEY);
+  bookSort.option = option === "Title" || option === "Progress" || option === "Time Read" ? option : "Recent";
+  bookSort.reversed = loadForkPreference(REVERSED_KEY) === "true";
+  bookSort.customShelves = storedCustomShelves();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("nagefurin-settings-loaded", refreshBookSortFromForkFile);
 }

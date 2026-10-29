@@ -1,12 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { clearCustomShelf, renameCustomShelf } from "./bookSort.svelte";
 import type { BookMetadata, BookShelf, ShelfSource } from "./types";
+import { loadForkPreference, saveForkPreference } from "./forkStorage";
 
 const ORDERS_KEY = "bookshelfShelfOrders";
 
 function storedOrders() {
   try {
-    return JSON.parse(localStorage.getItem(ORDERS_KEY) ?? "{}") as Record<string, string[]>;
+    return JSON.parse(loadForkPreference(ORDERS_KEY) ?? "{}") as Record<string, string[]>;
   } catch {
     return {};
   }
@@ -22,7 +23,7 @@ export async function loadShelves() {
 }
 
 export function saveShelfOrders() {
-  localStorage.setItem(ORDERS_KEY, JSON.stringify($state.snapshot(shelves.orders)));
+  saveForkPreference(ORDERS_KEY, JSON.stringify($state.snapshot(shelves.orders)));
 }
 
 export async function createShelf(name: string) {
@@ -120,4 +121,12 @@ export function authors(books: BookMetadata[]) {
   }
   return [...groups.values()]
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+function refreshShelfOrdersFromForkFile() {
+  shelves.orders = storedOrders();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("nagefurin-settings-loaded", refreshShelfOrdersFromForkFile);
 }

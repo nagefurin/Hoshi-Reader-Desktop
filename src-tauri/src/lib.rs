@@ -12,6 +12,7 @@ mod fonts;
 mod highlights;
 mod ime;
 mod library;
+mod settings;
 mod local_audio;
 #[cfg(windows)]
 mod media_controls;
@@ -22,8 +23,8 @@ mod search;
 mod statistics;
 mod sync;
 mod transcriber;
+mod tts;
 mod ttu_statistics;
-mod updater;
 mod wheel;
 #[cfg(target_os = "macos")]
 mod writing_tools;
@@ -41,9 +42,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                .with_filename(".window-state-nagefurin-fork.json")
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         & !tauri_plugin_window_state::StateFlags::VISIBLE,
@@ -109,6 +110,8 @@ pub fn run() {
             library::epub_author,
             library::set_book_author,
             library::load_book_info,
+            settings::load_fork_settings,
+            settings::save_fork_settings,
             search::search_book,
             highlights::load_highlights,
             highlights::save_highlights,
@@ -143,6 +146,15 @@ pub fn run() {
             transcriber::sasayaki_clear_transcript,
             transcriber::sasayaki_pause_transcription,
             transcriber::sasayaki_transcribe,
+            tts::tts_load_text,
+            tts::tts_system_voices,
+            tts::tts_edge_voices,
+            tts::tts_azure_voices,
+            tts::tts_microsoft_translator_voices,
+            tts::tts_google_cloud_voices,
+            tts::tts_custom_voices,
+            tts::tts_custom_models,
+            tts::tts_synthesize,
             #[cfg(windows)]
             media_controls::media_controls_metadata,
             #[cfg(windows)]
@@ -192,12 +204,12 @@ pub fn run() {
             sync::gdrive::gdrive_download_all,
             sync::gdrive::gdrive_download_book,
             sync::open_external,
-            updater::check_update,
-            updater::install_update
         ])
         .setup(|app| {
+            library::import_original_settings(app.handle())?;
+            library::import_portable_books(app.handle())?;
             #[cfg(windows)]
-            media_controls::set_app_id(&app.config().identifier).ok();
+            media_controls::set_app_id("de.manhhao.hoshi.nagefurin-fork").ok();
             let builder = tauri::WebviewWindowBuilder::from_config(
                 app.handle(),
                 &app.config().app.windows[0],
