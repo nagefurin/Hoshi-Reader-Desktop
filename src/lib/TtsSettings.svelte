@@ -13,12 +13,21 @@
   let edgeVoices = $state<string[]>([]);
   let edgeVoiceLoading = $state(false);
   let edgeVoiceError = $state("");
+  let azureVoices = $state<string[]>([]);
+  let azureVoiceLoading = $state(false);
+  let azureVoiceError = $state("");
+  let translatorVoices = $state<string[]>([]);
+  let translatorVoiceLoading = $state(false);
+  let translatorVoiceError = $state("");
+  let googleCloudVoices = $state<string[]>([]);
+  let googleCloudVoiceLoading = $state(false);
+  let googleCloudVoiceError = $state("");
 
   function changeEngine(value: string) {
     const previous = ttsConfig.engine;
     const next = value as TtsEngine;
     if (next === "edge" && previous !== "edge") ttsConfig.pitch = 0;
-    if (next === "device" && previous === "edge") ttsConfig.pitch = 1;
+    if (next !== "edge" && previous === "edge") ttsConfig.pitch = 1;
     ttsConfig.engine = next;
     saveTtsConfig();
   }
@@ -42,8 +51,74 @@
     }
   }
 
+  async function refreshAzureVoices() {
+    if (!ttsRuntime.azureKey.trim()) {
+      azureVoiceError = "Enter an Azure Speech subscription key before refreshing voices.";
+      return;
+    }
+    azureVoiceLoading = true;
+    azureVoiceError = "";
+    try {
+      azureVoices = await invoke<string[]>("tts_azure_voices", {
+        region: ttsConfig.azureRegion,
+        apiKey: ttsRuntime.azureKey,
+      });
+      if (azureVoices.length && !azureVoices.includes(ttsConfig.azureVoice)) {
+        ttsConfig.azureVoice = azureVoices.includes("ja-JP-NanamiNeural") ? "ja-JP-NanamiNeural" : azureVoices[0];
+        saveTtsConfig();
+      }
+      if (!azureVoices.length) azureVoiceError = "No Japanese Azure voices were returned.";
+    } catch (error) {
+      azureVoiceError = String(error);
+    } finally {
+      azureVoiceLoading = false;
+    }
+  }
+
+  async function refreshTranslatorVoices() {
+    translatorVoiceLoading = true;
+    translatorVoiceError = "";
+    try {
+      translatorVoices = await invoke<string[]>("tts_microsoft_translator_voices");
+      if (translatorVoices.length && !translatorVoices.includes(ttsConfig.microsoftTranslatorVoice)) {
+        ttsConfig.microsoftTranslatorVoice = translatorVoices[0];
+        saveTtsConfig();
+      }
+      if (!translatorVoices.length) translatorVoiceError = "No Japanese Microsoft Translator voices were returned.";
+    } catch (error) {
+      translatorVoiceError = String(error);
+    } finally {
+      translatorVoiceLoading = false;
+    }
+  }
+
+  async function refreshGoogleCloudVoices() {
+    if (!ttsRuntime.googleCloudKey.trim()) {
+      googleCloudVoiceError = "Enter a Google Cloud Text-to-Speech API key before refreshing voices.";
+      return;
+    }
+    googleCloudVoiceLoading = true;
+    googleCloudVoiceError = "";
+    try {
+      googleCloudVoices = await invoke<string[]>("tts_google_cloud_voices", {
+        apiKey: ttsRuntime.googleCloudKey,
+      });
+      if (googleCloudVoices.length && !googleCloudVoices.includes(ttsConfig.googleCloudVoice)) {
+        ttsConfig.googleCloudVoice = googleCloudVoices[0];
+        saveTtsConfig();
+      }
+      if (!googleCloudVoices.length) googleCloudVoiceError = "No Japanese Google Cloud voices were returned.";
+    } catch (error) {
+      googleCloudVoiceError = String(error);
+    } finally {
+      googleCloudVoiceLoading = false;
+    }
+  }
+
   $effect(() => {
     if (ttsConfig.engine === "edge") void refreshEdgeVoices();
+    else if (ttsConfig.engine === "microsoftTranslator") void refreshTranslatorVoices();
+    if ((ttsConfig.engine as string) === "vits") changeEngine("device");
   });
 
   $effect(() => {
@@ -81,9 +156,11 @@
     <select class="select select-sm w-52" value={ttsConfig.engine} onchange={(event) => changeEngine(event.currentTarget.value)}>
       <option value="device">Device / system voice</option>
       <option value="edge">Microsoft Edge (online)</option>
+      <option value="azure">Microsoft Azure Speech</option>
+      <option value="microsoftTranslator">Microsoft Translator</option>
+      <option value="googleCloud">Google Cloud Text-to-Speech</option>
       <option value="googleTranslate">Google Translate (online)</option>
-      <option value="openAi">OpenAI-compatible endpoint</option>
-      <option value="vits">VITS (self-hosted)</option>
+      <option value="openAi">OpenAI-compatible / custom endpoint</option>
     </select>
   </SettingRow>
 
@@ -134,8 +211,71 @@
     {#if edgeVoiceError}
       <p class="text-xs text-error">{edgeVoiceError}</p>
     {/if}
-    <p class="text-xs text-base-content/60">Edge TTS is an online Microsoft service and does not require an API key. Voice availability may change on the service side.</p>
-  {:else if ttsConfig.engine === "openAi" || ttsConfig.engine === "vits"}
+    <p class="text-xs text-base-content/60">Edge TTS uses Microsoft's Read Aloud service. It does not require an API key.</p>
+  {:else if ttsConfig.engine === "azure"}
+    <SettingRow compact={compact} label="Azure Region">
+      <input class="input input-sm w-52" bind:value={ttsConfig.azureRegion} onchange={save} placeholder="japaneast" />
+    </SettingRow>
+    <SettingRow compact={compact} label="Subscription Key">
+      <input class="input input-sm w-full max-w-lg" type="password" autocomplete="off" bind:value={ttsRuntime.azureKey} placeholder="Azure Speech key (session only)" />
+    </SettingRow>
+    <SettingRow compact={compact} label="Narration Voice">
+      <div class="flex max-w-lg flex-1 items-center gap-2">
+        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.azureVoice} onchange={save}>
+          {#if azureVoices.length === 0}<option value={ttsConfig.azureVoice}>{ttsConfig.azureVoice}</option>{/if}
+          {#each azureVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+        </select>
+        <button class="btn btn-outline btn-sm" onclick={refreshAzureVoices} disabled={azureVoiceLoading}>{azureVoiceLoading ? "Loading…" : "Refresh"}</button>
+      </div>
+    </SettingRow>
+    <SettingRow compact={compact} label="Dialogue Voice">
+      <select class="select select-sm w-52" bind:value={ttsConfig.azureDialogueVoice} onchange={save}>
+        <option value="">Same as narration</option>
+        {#each azureVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+      </select>
+    </SettingRow>
+    {#if azureVoiceError}<p class="text-xs text-error">{azureVoiceError}</p>{/if}
+  {:else if ttsConfig.engine === "microsoftTranslator"}
+    <SettingRow compact={compact} label="Narration Voice">
+      <div class="flex max-w-lg flex-1 items-center gap-2">
+        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.microsoftTranslatorVoice} onchange={save}>
+          {#if translatorVoices.length === 0}<option value={ttsConfig.microsoftTranslatorVoice}>{ttsConfig.microsoftTranslatorVoice}</option>{/if}
+          {#each translatorVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+        </select>
+        <button class="btn btn-outline btn-sm" onclick={refreshTranslatorVoices} disabled={translatorVoiceLoading}>{translatorVoiceLoading ? "Loading…" : "Refresh"}</button>
+      </div>
+    </SettingRow>
+    <SettingRow compact={compact} label="Dialogue Voice">
+      <select class="select select-sm w-52" bind:value={ttsConfig.microsoftTranslatorDialogueVoice} onchange={save}>
+        <option value="">Same as narration</option>
+        {#each translatorVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+      </select>
+    </SettingRow>
+    {#if translatorVoiceError}<p class="text-xs text-error">{translatorVoiceError}</p>{/if}
+    <p class="text-xs text-base-content/60">Uses Microsoft's Translator mobile-client service. Availability and access can change.</p>
+  {:else if ttsConfig.engine === "googleCloud"}
+    <SettingRow compact={compact} label="API Key">
+      <input class="input input-sm w-full max-w-lg" type="password" autocomplete="off" bind:value={ttsRuntime.googleCloudKey} placeholder="Google Cloud key (session only)" />
+    </SettingRow>
+    <SettingRow compact={compact} label="Narration Voice">
+      <div class="flex max-w-lg flex-1 items-center gap-2">
+        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.googleCloudVoice} onchange={save}>
+          {#if googleCloudVoices.length === 0}<option value={ttsConfig.googleCloudVoice}>{ttsConfig.googleCloudVoice}</option>{/if}
+          {#each googleCloudVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+        </select>
+        <button class="btn btn-outline btn-sm" onclick={refreshGoogleCloudVoices} disabled={googleCloudVoiceLoading}>{googleCloudVoiceLoading ? "Loading…" : "Refresh"}</button>
+      </div>
+    </SettingRow>
+    <SettingRow compact={compact} label="Dialogue Voice">
+      <select class="select select-sm w-52" bind:value={ttsConfig.googleCloudDialogueVoice} onchange={save}>
+        <option value="">Same as narration</option>
+        {#each googleCloudVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+      </select>
+    </SettingRow>
+    {#if googleCloudVoiceError}<p class="text-xs text-error">{googleCloudVoiceError}</p>{/if}
+  {:else if ttsConfig.engine === "googleTranslate"}
+    <p class="text-xs text-base-content/60">Google Translate uses its default Japanese voice. It has no voice selector or API key.</p>
+  {:else if ttsConfig.engine === "openAi"}
     <SettingRow compact={compact} label="Base URL">
       <input
         class="input input-sm w-full max-w-lg"
@@ -157,18 +297,6 @@
       </SettingRow>
       <SettingRow compact={compact} label="Dialogue Voice">
         <input class="input input-sm w-52" bind:value={ttsConfig.remoteDialogueVoice} onchange={save} placeholder="Same as narration" />
-      </SettingRow>
-    {:else}
-      <SettingRow compact={compact} label="VITS Model">
-        <select class="select select-sm w-52" bind:value={ttsConfig.vitsModel} onchange={save}>
-          <option value="vits">VITS</option>
-          <option value="w2v2-vits">W2V2-VITS</option>
-          <option value="bert-vits2">BERT-VITS2</option>
-          <option value="gpt-sovits">GPT-SoVITS</option>
-        </select>
-      </SettingRow>
-      <SettingRow compact={compact} label="Speaker ID">
-        <input class="input input-sm w-28" type="number" min="0" step="1" bind:value={ttsConfig.speakerId} onchange={save} />
       </SettingRow>
     {/if}
     <p class="text-xs text-base-content/60">Generated speech text is sent to the configured service. HTTPS is required for remote hosts; HTTP is allowed only for localhost or private-network hosts. API keys are not saved to disk and are cleared when the app restarts.</p>
