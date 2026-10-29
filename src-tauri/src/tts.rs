@@ -48,7 +48,7 @@ pub struct TtsChapter {
     pub image_index_start: usize,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TtsRubyRange {
     pub start: usize,
