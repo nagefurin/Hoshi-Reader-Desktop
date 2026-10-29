@@ -43,8 +43,17 @@ pub struct TtsChapter {
     pub title: String,
     pub text: String,
     pub ruby_text: String,
+    pub ruby_ranges: Vec<TtsRubyRange>,
     pub image_offsets: Vec<usize>,
     pub image_index_start: usize,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsRubyRange {
+    pub start: usize,
+    pub end: usize,
+    pub reading: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -131,11 +140,16 @@ static RE_RUBY_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
 static RE_RUBY_RT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<rt\b[^>]*>(.*?)</rt>").unwrap()
 });
+static RE_RUBY_RP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<rp\b[^>]*>.*?</rp>").unwrap()
+});
 static RE_NUMERIC_ENTITY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"&#(x[0-9a-fA-F]+|[0-9]+);").unwrap());
 static RE_IMAGE_TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)<(?:img|image)\b[^>]*>").unwrap());
 const IMAGE_MARKER: char = '\u{E000}';
+const RUBY_START_MARKER: char = '\u{E001}';
+const RUBY_END_MARKER: char = '\u{E002}';
 
 fn decode_entities(value: &str) -> String {
     let decoded = RE_NUMERIC_ENTITY.replace_all(value, |captures: &Captures<'_>| {
@@ -186,9 +200,25 @@ fn speakable_text(html: &str, use_ruby_readings: bool) -> String {
         .join("\n\n")
 }
 
-fn speakable_text_with_images(html: &str) -> (String, Vec<usize>) {
+fn speakable_text_with_images(html: &str) -> (String, Vec<usize>, Vec<TtsRubyRange>) {
     let body = library::body(html);
-    let marked = RE_IMAGE_TAG.replace_all(body, IMAGE_MARKER.to_string());
+    let mut readings = Vec::<String>::new();
+    let marked_ruby = RE_RUBY_BLOCK.replace_all(body, |captures: &Captures<'_>| {
+        let ruby_markup = &captures[0];
+        let reading = RE_RUBY_RT.captures_iter(ruby_markup)
+            .map(|capture| decode_entities(&library::strip(&capture[1])).trim().to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        let without_rt = RE_RUBY_RT.replace_all(ruby_markup, "");
+        let base = RE_RUBY_RP.replace_all(&without_rt, "");
+        if reading.trim().is_empty() {
+            base.into_owned()
+        } else {
+            readings.push(reading);
+            format!("{RUBY_START_MARKER}{}{RUBY_END_MARKER}", base)
+        }
+    });
+    let marked = RE_IMAGE_TAG.replace_all(marked_ruby.as_ref(), IMAGE_MARKER.to_string());
     let with_breaks = RE_BLOCK.replace_all(&marked, "\n");
     let decoded = decode_entities(&with_breaks);
     let plain = library::strip(&decoded);
@@ -198,19 +228,33 @@ fn speakable_text_with_images(html: &str) -> (String, Vec<usize>) {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
+
     let mut text = String::with_capacity(formatted.len());
     let mut image_offsets = Vec::new();
+    let mut ruby_ranges = Vec::new();
+    let mut reading_iter = readings.into_iter();
+    let mut ruby_start = None;
     let mut character_count = 0usize;
     for character in formatted.chars() {
-        if character == IMAGE_MARKER {
-            image_offsets.push(character_count);
-        } else {
-            text.push(character);
-            character_count += 1;
+        match character {
+            RUBY_START_MARKER => {
+                ruby_start = Some(character_count);
+            }
+            RUBY_END_MARKER => {
+                if let (Some(start), Some(reading)) = (ruby_start.take(), reading_iter.next()) {
+                    ruby_ranges.push(TtsRubyRange { start, end: character_count, reading });
+                }
+            }
+            IMAGE_MARKER => image_offsets.push(character_count),
+            _ => {
+                text.push(character);
+                character_count += 1;
+            }
         }
     }
-    (text, image_offsets)
+    (text, image_offsets, ruby_ranges)
 }
+
 
 fn request_client() -> Result<Client, String> {
     Client::builder()
@@ -274,7 +318,7 @@ pub async fn tts_load_text(app: AppHandle, id: String, _use_ruby_readings: bool)
         if !entry.is_linear() || item.properties().as_str().contains("nav") {
             continue;
         }
-        let (text, image_offsets) = speakable_text_with_images(&content);
+        let (text, image_offsets, ruby_ranges) = speakable_text_with_images(&content);
         let ruby_text = speakable_text(&content, true);
         if text.trim().is_empty() {
             continue;
@@ -287,7 +331,7 @@ pub async fn tts_load_text(app: AppHandle, id: String, _use_ruby_readings: bool)
             .filter(|label| !label.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| format!("Chapter {}", spine_index + 1));
-        chapters.push(TtsChapter { spine_index, title, text, ruby_text, image_offsets, image_index_start });
+        chapters.push(TtsChapter { spine_index, title, text, ruby_text, ruby_ranges, image_offsets, image_index_start });
     }
 
     if chapters.is_empty() {
@@ -1019,8 +1063,7 @@ fn wait_for_speech_operation<T>(
 
 #[cfg(windows)]
 fn windows_system_synthesize(text: &str, voice_id: &str, rate: f32, pitch: f32) -> Result<Vec<u8>, String> {
-    let _apartment = init_sta()
-        .map_err(|error| format!("Could not initialize the Windows speech apartment: {error}"))?;
+    let _apartment = WindowsSpeechApartment::new()?;
     let voices = SpeechSynthesizer::AllVoices()
         .map_err(|error| format!("Windows could not enumerate installed speech voices: {error}"))?;
     let count = voices.Size()
@@ -1151,6 +1194,29 @@ mod edge_token_tests {
     fn ruby_readings_strip_nested_markup_inside_rt() {
         let html = "<html><body><p><ruby><rb>今日</rb><rt><span>きょう</span></rt></ruby>です。</p></body></html>";
         assert_eq!(super::speakable_text(html, true), "きょうです。");
+    }
+
+    #[test]
+    fn ruby_ranges_preserve_source_text_offsets_and_readings() {
+        let html = "<html><body><p>今日は<ruby>晴天<rp>(</rp><rt>せいてん</rt><rp>)</rp></ruby>です。</p></body></html>";
+        let (text, _, ranges) = super::speakable_text_with_images(html);
+        assert_eq!(text, "今日は晴天です。");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start, 3);
+        assert_eq!(ranges[0].end, 5);
+        assert_eq!(ranges[0].reading, "せいてん");
+    }
+
+    #[test]
+    fn image_backed_ruby_produces_zero_width_range_and_image_offset() {
+        let html = "<html><body><p>前<ruby><img src='glyph.png'/><rt>たず</rt></ruby>ねた。</p></body></html>";
+        let (text, images, ranges) = super::speakable_text_with_images(html);
+        assert_eq!(text, "前ねた。");
+        assert_eq!(images, vec![1]);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start, 1);
+        assert_eq!(ranges[0].end, 1);
+        assert_eq!(ranges[0].reading, "たず");
     }
 
     #[test]
