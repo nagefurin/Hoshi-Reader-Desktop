@@ -57,7 +57,7 @@
       dialogueVoice: "",
     };
     ttsConfig.customSources = [...ttsConfig.customSources, source];
-    ttsConfig.engine = source.id;
+    ttsConfig.engine = source.id as TtsEngine;
     save();
     beginEdit(source);
   }
