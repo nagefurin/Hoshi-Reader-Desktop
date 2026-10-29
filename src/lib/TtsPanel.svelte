@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { AudioLines, Pause, Play, SkipBack, SkipForward, Square } from "@lucide/svelte";
+  import { AudioLines, Pause, Play, Repeat, SkipBack, SkipForward, Square } from "@lucide/svelte";
   import { ttsConfig, ttsRuntime } from "./ttsConfig.svelte";
   import TtsSettings from "./TtsSettings.svelte";
   import { sasayakiConfig } from "./sasayakiConfig.svelte";
@@ -50,6 +50,9 @@
   let currentAudio: HTMLAudioElement | null = null;
   let currentUtterance: SpeechSynthesisUtterance | null = null;
   let autoPausedForLookup = false;
+  let audioCache = new Map<number, { fingerprint: string; promise: Promise<string> }>();
+  let pendingNextPosition: number | null = null;
+  let waitingBetweenSentences = false;
 
   $effect(() => {
     const shouldPauseForLookup = lookupActive && sasayakiConfig.sasayakiAutoPause;
@@ -180,8 +183,84 @@
     return result;
   }
 
+  function synthesisVoice(segment: SpokenSegment): string {
+    if (ttsConfig.engine === "edge") return segment.dialogue ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice) : ttsConfig.edgeVoice;
+    if (ttsConfig.engine === "azure") return segment.dialogue ? (ttsConfig.azureDialogueVoice || ttsConfig.azureVoice) : ttsConfig.azureVoice;
+    if (ttsConfig.engine === "microsoftTranslator") return segment.dialogue
+      ? (ttsConfig.microsoftTranslatorDialogueVoice || ttsConfig.microsoftTranslatorVoice)
+      : ttsConfig.microsoftTranslatorVoice;
+    if (ttsConfig.engine === "googleCloud") return segment.dialogue
+      ? (ttsConfig.googleCloudDialogueVoice || ttsConfig.googleCloudVoice)
+      : ttsConfig.googleCloudVoice;
+    if (ttsConfig.engine === "googleTranslate") return "ja";
+    return segment.dialogue ? (ttsConfig.remoteDialogueVoice || ttsConfig.remoteVoice) : ttsConfig.remoteVoice;
+  }
+
+  function synthesisFingerprint(): string {
+    return JSON.stringify([
+      ttsConfig.engine, ttsConfig.endpoint, ttsConfig.model, ttsConfig.rate, ttsConfig.pitch,
+      ttsConfig.edgeVoice, ttsConfig.edgeDialogueVoice, ttsConfig.azureRegion,
+      ttsConfig.azureVoice, ttsConfig.azureDialogueVoice, ttsConfig.microsoftTranslatorVoice,
+      ttsConfig.microsoftTranslatorDialogueVoice, ttsConfig.googleCloudVoice,
+      ttsConfig.googleCloudDialogueVoice, ttsConfig.remoteVoice, ttsConfig.remoteDialogueVoice,
+      ttsRuntime.apiKey, ttsRuntime.azureKey, ttsRuntime.googleCloudKey,
+    ]);
+  }
+
+  function synthesizedAudio(segmentIndex: number): Promise<string> {
+    const segment = segments[segmentIndex];
+    if (!segment) return Promise.reject(new Error("TTS segment is no longer available."));
+    const fingerprint = synthesisFingerprint();
+    const existing = audioCache.get(segmentIndex);
+    if (existing?.fingerprint === fingerprint) return existing.promise;
+
+    const promise = invoke<string>("tts_synthesize", {
+      engine: ttsConfig.engine,
+      text: segment.text,
+      baseUrl: ttsConfig.engine === "azure" ? ttsConfig.azureRegion : ttsConfig.endpoint,
+      apiKey: ttsConfig.engine === "azure"
+        ? ttsRuntime.azureKey
+        : ttsConfig.engine === "googleCloud"
+          ? ttsRuntime.googleCloudKey
+          : ttsRuntime.apiKey,
+      model: ttsConfig.model,
+      voice: synthesisVoice(segment),
+      rate: Number(ttsConfig.rate) || 1,
+      pitch: Number(ttsConfig.pitch) || 0,
+    }).catch((error) => {
+      if (audioCache.get(segmentIndex)?.promise === promise) audioCache.delete(segmentIndex);
+      throw error;
+    });
+    audioCache.set(segmentIndex, { fingerprint, promise });
+    return promise;
+  }
+
+  function prefetchAhead(segmentIndex: number) {
+    if (ttsConfig.engine === "device") return;
+    const count = Math.max(1, Math.min(10, Math.round(Number(ttsConfig.prefetchSentences) || 1)));
+    const end = Math.min(segments.length, segmentIndex + 1 + count);
+    for (let index = segmentIndex + 1; index < end; index++) {
+      void synthesizedAudio(index).catch(() => {});
+    }
+  }
+
+  async function advanceAfterSegment(segmentIndex: number, token: number) {
+    if (token !== runId || !active) return;
+    pendingNextPosition = segmentIndex + 1;
+    const pauseMs = Math.min(2000, Math.max(0, Math.round(Number(ttsConfig.sentencePauseMs) || 0)));
+    waitingBetweenSentences = pauseMs > 0;
+    if (pauseMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, pauseMs));
+    waitingBetweenSentences = false;
+    if (token !== runId || !active || paused || pendingNextPosition !== segmentIndex + 1) return;
+    position = pendingNextPosition;
+    pendingNextPosition = null;
+    void speakAt(position, token);
+  }
+
   function cancelCurrent(): number {
     runId += 1;
+    pendingNextPosition = null;
+    waitingBetweenSentences = false;
     if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
     if (currentAudio) {
       currentAudio.pause();
@@ -213,6 +292,7 @@
       if (token !== runId) return;
       chapters = loaded;
       segments = buildSegments(loaded, startIndex);
+      audioCache.clear();
       if (segments.length === 0) throw new Error("No readable text remains after pronunciation replacements.");
       position = 0;
       active = true;
@@ -273,9 +353,8 @@
       utterance.pitch = Math.min(2, Math.max(0.5, Number(ttsConfig.pitch) || 1));
       utterance.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
       utterance.onend = () => {
-        if (token !== runId || !active || paused) return;
-        position = segmentIndex + 1;
-        void speakAt(position, token);
+        if (token !== runId || !active) return;
+        void advanceAfterSegment(segmentIndex, token);
       };
       utterance.onerror = (event) => {
         if (token !== runId || event.error === "canceled" || event.error === "interrupted") return;
@@ -291,38 +370,14 @@
     }
 
     try {
-      const encoded = await invoke<string>("tts_synthesize", {
-        engine: ttsConfig.engine,
-        text: segment.text,
-        baseUrl: ttsConfig.engine === "azure" ? ttsConfig.azureRegion : ttsConfig.endpoint,
-        apiKey: ttsConfig.engine === "azure"
-          ? ttsRuntime.azureKey
-          : ttsConfig.engine === "googleCloud"
-            ? ttsRuntime.googleCloudKey
-            : ttsRuntime.apiKey,
-        model: ttsConfig.model,
-        voice: ttsConfig.engine === "edge"
-          ? (segment.dialogue ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice) : ttsConfig.edgeVoice)
-          : ttsConfig.engine === "azure"
-            ? (segment.dialogue ? (ttsConfig.azureDialogueVoice || ttsConfig.azureVoice) : ttsConfig.azureVoice)
-            : ttsConfig.engine === "microsoftTranslator"
-              ? (segment.dialogue ? (ttsConfig.microsoftTranslatorDialogueVoice || ttsConfig.microsoftTranslatorVoice) : ttsConfig.microsoftTranslatorVoice)
-              : ttsConfig.engine === "googleCloud"
-                ? (segment.dialogue ? (ttsConfig.googleCloudDialogueVoice || ttsConfig.googleCloudVoice) : ttsConfig.googleCloudVoice)
-                : ttsConfig.engine === "googleTranslate"
-                  ? "ja"
-                  : segment.dialogue ? (ttsConfig.remoteDialogueVoice || ttsConfig.remoteVoice) : ttsConfig.remoteVoice,
-        rate: Number(ttsConfig.rate) || 1,
-        pitch: Number(ttsConfig.pitch) || 0,
-      });
+      const encoded = await synthesizedAudio(segmentIndex);
       if (token !== runId) return;
       const audio = new Audio("data:audio/mpeg;base64," + encoded);
       audio.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
       audio.playbackRate = Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
       audio.onended = () => {
-        if (token !== runId || !active || paused) return;
-        position = segmentIndex + 1;
-        void speakAt(position, token);
+        if (token !== runId || !active) return;
+        void advanceAfterSegment(segmentIndex, token);
       };
       audio.onerror = () => {
         if (token !== runId) return;
@@ -354,6 +409,13 @@
 
   async function resumePlayback() {
     paused = false;
+    if (pendingNextPosition !== null && !waitingBetweenSentences) {
+      position = pendingNextPosition;
+      pendingNextPosition = null;
+      void speakAt(position, runId);
+      return;
+    }
+    if (pendingNextPosition !== null && waitingBetweenSentences) return;
     if (ttsConfig.engine === "device") {
       if ("speechSynthesis" in window) window.speechSynthesis.resume();
     } else if (currentAudio) {
