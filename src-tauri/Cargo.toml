@@ -35,6 +35,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 open = "5.4.0"
 sha2 = "0.11.0"
+hmac = "0.12"
 keyring-core = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 hoshidicts = { git = "https://github.com/Manhhao/hoshidicts-rs.git", branch = "main" }
