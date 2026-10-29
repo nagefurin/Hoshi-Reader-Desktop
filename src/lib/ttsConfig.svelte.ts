@@ -1,6 +1,6 @@
 import { persisted } from "./persisted.svelte";
 
-export type TtsEngine = "device" | "edge" | "googleTranslate" | "openAi" | "vits";
+export type TtsEngine = "device" | "edge" | "googleTranslate" | "azure" | "microsoftTranslator" | "googleCloud" | "openAi";
 export type TtsReplacement = {
   id: string;
   pattern: string;
@@ -23,8 +23,13 @@ export type TtsConfig = {
   edgeVoice: string;
   edgeDialogueVoice: string;
   remoteDialogueVoice: string;
-  vitsModel: "vits" | "w2v2-vits" | "bert-vits2" | "gpt-sovits";
-  speakerId: number;
+  azureRegion: string;
+  azureVoice: string;
+  azureDialogueVoice: string;
+  microsoftTranslatorVoice: string;
+  microsoftTranslatorDialogueVoice: string;
+  googleCloudVoice: string;
+  googleCloudDialogueVoice: string;
   replacements: TtsReplacement[];
 };
 
@@ -44,8 +49,13 @@ const defaults: TtsConfig = {
   edgeVoice: "ja-JP-NanamiNeural",
   edgeDialogueVoice: "",
   remoteDialogueVoice: "",
-  vitsModel: "vits",
-  speakerId: 0,
+  azureRegion: "japaneast",
+  azureVoice: "ja-JP-NanamiNeural",
+  azureDialogueVoice: "",
+  microsoftTranslatorVoice: "ja-JP-NanamiNeural",
+  microsoftTranslatorDialogueVoice: "",
+  googleCloudVoice: "ja-JP-Neural2-B",
+  googleCloudDialogueVoice: "",
   replacements: [],
 };
 
