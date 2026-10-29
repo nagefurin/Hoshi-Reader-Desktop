@@ -22,6 +22,7 @@ mod search;
 mod statistics;
 mod sync;
 mod transcriber;
+mod tts;
 mod ttu_statistics;
 mod updater;
 mod wheel;
@@ -143,6 +144,8 @@ pub fn run() {
             transcriber::sasayaki_clear_transcript,
             transcriber::sasayaki_pause_transcription,
             transcriber::sasayaki_transcribe,
+            tts::tts_load_text,
+            tts::tts_synthesize,
             #[cfg(windows)]
             media_controls::media_controls_metadata,
             #[cfg(windows)]

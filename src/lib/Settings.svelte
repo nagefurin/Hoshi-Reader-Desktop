@@ -4,6 +4,7 @@
     ["dictionaries", "Dictionaries"],
     ["anki", "Anki"],
     ["audio", "Audio"],
+    ["tts", "Text-to-Speech"],
     ["syncing", "Syncing"],
     ["input", "Input"],
     ["sasayaki", "Sasayaki"],
@@ -70,6 +71,7 @@
   import About from "./About.svelte";
   import { defaultFonts } from "./readerConfig.svelte";
   import SasayakiSettings from "./SasayakiSettings.svelte";
+  import TtsSettings from "./TtsSettings.svelte";
   import SettingSlider from "./SettingSlider.svelte";
   import SettingStepper from "./SettingStepper.svelte";
   import SettingToggle from "./SettingToggle.svelte";
@@ -1363,6 +1365,8 @@
             </div>
           {/if}
         {/if}
+      {:else if tab === "tts"}
+        <TtsSettings />
       {:else if tab === "sasayaki"}
         <SettingsSection title="Sasayaki (Audiobooks)">
           <SettingToggle

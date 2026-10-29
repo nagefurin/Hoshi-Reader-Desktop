@@ -49,6 +49,7 @@
   import { readerConfig } from "./readerConfig.svelte";
   import Appearance from "./Appearance.svelte";
   import SasayakiSettings from "./SasayakiSettings.svelte";
+  import TtsPanel from "./TtsPanel.svelte";
   import SettingGroup from "./SettingGroup.svelte";
   import SettingSlider from "./SettingSlider.svelte";
   import { infoColor, readerBackground, readerTextColor, resolvedScheme } from "./theme.svelte";
@@ -130,7 +131,7 @@
   let bookDeleted = false;
   let applyingBookmark = false;
   let fullscreen = $state(false);
-  let readerPanel = $state<"Chapters" | "Search" | "Highlights" | "Appearance" | "Sasayaki" | null>(null);
+  let readerPanel = $state<"Chapters" | "Search" | "Highlights" | "Appearance" | "Sasayaki" | "TTS" | null>(null);
   let leftPanel = $state<typeof readerPanel>(null);
   let rightPanel = $state<typeof readerPanel>(null);
   let wasPaused = $state(false);
@@ -1226,7 +1227,7 @@
     readerPanel = panel;
     closePopups();
     if (panel) {
-      if (panel === "Appearance" || panel === "Sasayaki") rightPanel = panel;
+      if (panel === "Appearance" || panel === "Sasayaki" || panel === "TTS") rightPanel = panel;
       else leftPanel = panel;
       jumpToOpen = false;
       jumpToInput = "";
@@ -1814,6 +1815,15 @@
           </button>
         {/if}
         <button
+          class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS'
+            ? 'btn-active text-primary'
+            : 'text-base-content/60'}"
+          title="Text-to-Speech"
+          onclick={() => openReaderPanel(readerPanel === "TTS" ? null : "TTS")}
+        >
+          <Volume2 class="size-4" />
+        </button>
+        <button
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'Appearance'
             ? 'btn-active text-primary'
             : 'text-base-content/60'}"
@@ -2305,6 +2315,12 @@
       {#if side === "left"}
         <div class="min-h-0 flex-1 flex-col {panel === 'Search' ? 'flex' : 'hidden'}">
           <BookSearch {id} {positionLabel} onJump={jumpToSearchResult} bind:this={bookSearch} />
+        </div>
+      {/if}
+
+      {#if side === "right"}
+        <div class="min-h-0 flex-1 flex-col {panel === 'TTS' ? 'flex' : 'hidden'}">
+          <TtsPanel {id} {title} currentChapterIndex={index} onNavigate={(spineIndex) => navigateTo(spineIndex, 0)} />
         </div>
       {/if}
 
