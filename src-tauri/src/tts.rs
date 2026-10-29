@@ -7,7 +7,6 @@ use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD};
 use chrono::{Datelike, Timelike, Utc};
 use futures_util::{SinkExt, StreamExt};
-use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use tokio_tungstenite::{
     connect_async,
@@ -343,6 +342,24 @@ async fn tts_google_cloud_voice_list(api_key: &str) -> Result<Vec<String>, Strin
     Ok(voices)
 }
 
+fn hmac_sha256(key: &[u8], message: &[u8]) -> Vec<u8> {
+    const BLOCK: usize = 64;
+    let mut key_block = if key.len() > BLOCK {
+        Sha256::digest(key).to_vec()
+    } else {
+        key.to_vec()
+    };
+    key_block.resize(BLOCK, 0);
+    let mut inner = Vec::with_capacity(BLOCK + message.len());
+    inner.extend(key_block.iter().map(|byte| byte ^ 0x36));
+    inner.extend_from_slice(message);
+    let inner_hash = Sha256::digest(&inner);
+    let mut outer = Vec::with_capacity(BLOCK + inner_hash.len());
+    outer.extend(key_block.iter().map(|byte| byte ^ 0x5c));
+    outer.extend_from_slice(&inner_hash);
+    Sha256::digest(&outer).to_vec()
+}
+
 fn microsoft_translator_signature(unix_seconds: u64, nonce: &str) -> Result<String, String> {
     const APPLICATION: &str = "MSTranslatorAndroidApp";
     const SIGNING_KEY: &str = "oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw==";
@@ -356,10 +373,7 @@ fn microsoft_translator_signature(unix_seconds: u64, nonce: &str) -> Result<Stri
     let input = format!("{APPLICATION}{encoded_url}{date}{nonce}").to_ascii_lowercase();
     let key = STANDARD.decode(SIGNING_KEY)
         .map_err(|_| "Could not initialize Microsoft Translator authorization.".to_string())?;
-    let mut mac = Hmac::<Sha256>::new_from_slice(&key)
-        .map_err(|_| "Could not initialize Microsoft Translator authorization.".to_string())?;
-    mac.update(input.as_bytes());
-    let signature = STANDARD.encode(mac.finalize().into_bytes());
+    let signature = STANDARD.encode(hmac_sha256(&key, input.as_bytes()));
     Ok(format!("{APPLICATION}::{signature}::{date}::{nonce}"))
 }
 
