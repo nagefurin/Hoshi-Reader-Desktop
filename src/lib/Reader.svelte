@@ -1185,6 +1185,7 @@
       navigateTo(spineIndex, progress);
       return;
     }
+    if (loading) return;
     pendingTtsHighlight = null;
     postToFrame({ hoshi: "tts-highlight", text, reveal: true });
   }
