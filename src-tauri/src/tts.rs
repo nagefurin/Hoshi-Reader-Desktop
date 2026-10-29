@@ -72,6 +72,154 @@ pub struct SystemTtsVoiceInfo {
     pub is_default: bool,
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TtsCustomSource {
+    pub id: String,
+    pub name: String,
+    pub protocol: String,
+    pub base_url: String,
+    pub model: String,
+    pub rate: f32,
+    pub format: String,
+    pub preset: String,
+    pub voice_ids: Vec<String>,
+    pub narration_voice: String,
+    pub dialogue_voice: String,
+}
+
+fn custom_http_host_is_private(host: &str) -> bool {
+    let host = host.trim_matches(|character| character == '[' || character == ']').to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_private() || ip.is_loopback() || {
+            let octets = ip.octets();
+            octets[0] == 169 && octets[1] == 254
+        },
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local(),
+        Err(_) => false,
+    }
+}
+
+fn custom_tts_base_url(value: &str) -> Result<Url, String> {
+    let mut url = Url::parse(value.trim()).map_err(|_| "Enter a valid custom TTS base URL.".to_string())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("Custom TTS URLs must use HTTP(S) and cannot contain credentials, query parameters, or fragments.".to_string());
+    }
+    let host = url.host_str().ok_or_else(|| "The custom TTS URL has no host.".to_string())?;
+    if url.scheme() == "http" && !custom_http_host_is_private(host) {
+        return Err("Plain HTTP is allowed only for localhost or a private/local network host. Use HTTPS for public hosts.".to_string());
+    }
+    if !url.path().ends_with('/') {
+        let mut path = url.path().to_string();
+        path.push('/');
+        url.set_path(&path);
+    }
+    Ok(url)
+}
+
+fn validate_custom_tts_source(source: &TtsCustomSource) -> Result<TtsCustomSource, String> {
+    let mut normalized = source.clone();
+    normalized.id = normalized.id.trim().to_string();
+    normalized.name = normalized.name.trim().to_string();
+    normalized.model = normalized.model.trim().to_string();
+    normalized.preset = normalized.preset.trim().to_string();
+    if !normalized.id.starts_with("custom:") || normalized.id.len() <= 7 || normalized.name.is_empty() {
+        return Err("Give the custom TTS source a name and a valid custom source ID.".to_string());
+    }
+    if normalized.protocol.eq_ignore_ascii_case("openai") {
+        normalized.protocol = "openAi".to_string();
+    } else if normalized.protocol.eq_ignore_ascii_case("vits") {
+        normalized.protocol = "vits".to_string();
+    } else {
+        return Err("Choose either the OpenAI-compatible or VITS protocol.".to_string());
+    }
+    normalized.base_url = custom_tts_base_url(&normalized.base_url)?.to_string();
+    normalized.format = normalized.format.trim().to_ascii_lowercase();
+    if normalized.format.is_empty() {
+        normalized.format = "mp3".to_string();
+    }
+    if !matches!(normalized.format.as_str(), "mp3" | "wav") {
+        return Err("Custom TTS audio format must be MP3 or WAV.".to_string());
+    }
+    normalized.rate = if normalized.rate.is_finite() {
+        if normalized.protocol == "openAi" { normalized.rate.clamp(0.25, 4.0) }
+        else { normalized.rate.clamp(0.5, 3.0) }
+    } else {
+        1.0
+    };
+    normalized.voice_ids = normalized.voice_ids.iter().map(|voice| voice.trim().to_string())
+        .filter(|voice| !voice.is_empty()).collect();
+    normalized.voice_ids.sort();
+    normalized.voice_ids.dedup();
+    Ok(normalized)
+}
+
+async fn custom_tts_request(
+    source: &TtsCustomSource,
+    api_key: &str,
+    path: &str,
+    body: Option<Value>,
+) -> Result<reqwest::Response, String> {
+    let source = validate_custom_tts_source(source)?;
+    let base = custom_tts_base_url(&source.base_url)?;
+    let url = base.join(path).map_err(|_| "Could not prepare the custom TTS endpoint URL.".to_string())?;
+    let client = request_client()?;
+    let mut request = match body {
+        Some(body) => client.post(url).json(&body),
+        None => client.get(url),
+    };
+    let key = api_key.trim();
+    if !key.is_empty() {
+        if key.bytes().any(|byte| byte <= 0x20 || byte >= 0x7f) {
+            return Err("The custom TTS API key contains unsupported characters.".to_string());
+        }
+        if source.protocol == "openAi" {
+            request = request.bearer_auth(key);
+        } else {
+            request = request.header("X-API-KEY", key);
+        }
+    }
+    request.header("User-Agent", "Hoshi Reader Desktop")
+        .send().await.map_err(|error| format!("Could not connect to the custom TTS source: {error}"))
+}
+
+async fn custom_tts_json_response(response: reqwest::Response, provider: &str) -> Result<Value, String> {
+    let status = response.status();
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read the {provider} response: {error}"))?;
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err(format!("{provider} response was unexpectedly large."));
+    }
+    if !status.is_success() {
+        let detail = String::from_utf8_lossy(&bytes).chars().take(300).collect::<String>();
+        return Err(if detail.trim().is_empty() {
+            format!("{provider} returned HTTP {status}.")
+        } else {
+            format!("{provider} returned HTTP {status}: {detail}")
+        });
+    }
+    serde_json::from_slice(&bytes).map_err(|error| format!("{provider} returned invalid JSON: {error}"))
+}
+
+fn custom_vits_speaker(value: &str) -> Option<(&'static str, &'static str, u32)> {
+    let (model, id) = value.split_once(':')?;
+    let path = match model {
+        "VITS" => "vits",
+        "W2V2-VITS" => "w2v2-vits",
+        "BERT-VITS2" => "bert-vits2",
+        "GPT-SOVITS" => "gpt-sovits",
+        _ => return None,
+    };
+    Some((model, path, id.parse::<u32>().ok()?))
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TtsSynthesisOptions {
@@ -1245,6 +1393,167 @@ mod edge_token_tests {
 }
 
 #[tauri::command]
+pub async fn tts_custom_voices(source: TtsCustomSource, api_key: String) -> Result<Vec<TtsVoiceInfo>, String> {
+    let source = validate_custom_tts_source(&source)?;
+    let mut voices = Vec::new();
+    if source.protocol == "openAi" {
+        let response = custom_tts_request(&source, &api_key, "audio/voices", None).await?;
+        if !matches!(response.status().as_u16(), 404 | 405) {
+            let root = custom_tts_json_response(response, "Custom voice list").await?;
+            let values = root.as_array()
+                .or_else(|| root.get("voices").and_then(Value::as_array))
+                .or_else(|| root.get("data").and_then(Value::as_array))
+                .cloned().unwrap_or_default();
+            for item in values {
+                let id = item.as_str().map(str::to_string).or_else(|| {
+                    item.get("id").and_then(Value::as_str)
+                        .or_else(|| item.get("voice_id").and_then(Value::as_str))
+                        .or_else(|| item.get("name").and_then(Value::as_str))
+                        .map(str::to_string)
+                });
+                if let Some(id) = id.filter(|id| !id.trim().is_empty()) {
+                    voices.push(TtsVoiceInfo { id, styles: Vec::new(), roles: Vec::new() });
+                }
+            }
+        }
+        for id in &source.voice_ids {
+            voices.push(TtsVoiceInfo { id: id.clone(), styles: Vec::new(), roles: Vec::new() });
+        }
+    } else {
+        let response = custom_tts_request(&source, &api_key, "voice/speakers", None).await?;
+        let root = custom_tts_json_response(response, "VITS speaker list").await?;
+        let models = [
+            ("VITS", "vits"),
+            ("W2V2-VITS", "w2v2-vits"),
+            ("BERT-VITS2", "bert-vits2"),
+            ("GPT-SOVITS", "gpt-sovits"),
+        ];
+        for (model, _path) in models {
+            for speaker in root.get(model).and_then(Value::as_array).into_iter().flatten() {
+                let Some(object) = speaker.as_object() else { continue };
+                let id = object.get("id").and_then(Value::as_u64)
+                    .or_else(|| object.get("id").and_then(Value::as_str).and_then(|value| value.parse::<u64>().ok()));
+                let Some(id) = id.filter(|id| *id <= u32::MAX as u64) else { continue };
+                let is_japanese = match object.get("lang") {
+                    None => true,
+                    Some(Value::String(language)) => {
+                        language == "ja" || language == "jpn" || language.starts_with("ja-")
+                    }
+                    Some(Value::Array(languages)) => languages.iter().filter_map(Value::as_str)
+                        .any(|language| language == "ja" || language == "jpn" || language.starts_with("ja-")),
+                    _ => false,
+                };
+                if is_japanese {
+                    voices.push(TtsVoiceInfo { id: format!("{model}:{id}"), styles: Vec::new(), roles: Vec::new() });
+                }
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    voices.retain(|voice| seen.insert(voice.id.clone()));
+    Ok(voices)
+}
+
+#[tauri::command]
+pub async fn tts_custom_models(source: TtsCustomSource, api_key: String) -> Result<Vec<String>, String> {
+    let source = validate_custom_tts_source(&source)?;
+    if source.protocol != "openAi" {
+        return Ok(Vec::new());
+    }
+    let response = custom_tts_request(&source, &api_key, "models", None).await?;
+    if matches!(response.status().as_u16(), 404 | 405) {
+        return Ok(Vec::new());
+    }
+    let root = custom_tts_json_response(response, "Custom model list").await?;
+    let values = root.get("data").and_then(Value::as_array)
+        .or_else(|| root.as_array()).cloned().unwrap_or_default();
+    let mut models: Vec<String> = values.iter().filter_map(|item| item.get("id").and_then(Value::as_str)
+        .map(str::to_string)).filter(|value| !value.is_empty()).collect();
+    models.sort();
+    models.dedup();
+    Ok(models)
+}
+
+async fn tts_custom_synthesize(
+    source: &TtsCustomSource,
+    api_key: &str,
+    text: &str,
+    voice: &str,
+    rate: f32,
+) -> Result<String, String> {
+    let source = validate_custom_tts_source(source)?;
+    if text.trim().is_empty() {
+        return Err("There is no text to synthesize.".to_string());
+    }
+    if source.protocol == "openAi" && source.model.is_empty() {
+        return Err("Enter the model name required by the OpenAI-compatible source.".to_string());
+    }
+    let rate = if rate.is_finite() {
+        if source.protocol == "openAi" { rate.clamp(0.25, 4.0) } else { rate.clamp(0.5, 3.0) }
+    } else {
+        1.0
+    };
+    let mut selected_voice = voice.trim().to_string();
+    let (path, body) = if source.protocol == "openAi" {
+        let mut body = json!({
+            "model": source.model,
+            "input": text,
+            "speed": rate,
+            "response_format": source.format
+        });
+        if !selected_voice.is_empty() {
+            body["voice"] = json!(selected_voice);
+        }
+        ("audio/speech".to_string(), body)
+    } else {
+        if selected_voice.is_empty() {
+            selected_voice = tts_custom_voices(source.clone(), api_key.to_string()).await?
+                .first().map(|item| item.id.clone()).unwrap_or_default();
+        }
+        let (model, endpoint, speaker_id) = custom_vits_speaker(&selected_voice)
+            .ok_or_else(|| "Choose a Japanese VITS speaker before synthesizing.".to_string())?;
+        let mut body = json!({
+            "text": text,
+            "id": speaker_id,
+            "lang": "ja",
+            "format": source.format,
+            "streaming": false
+        });
+        if model == "GPT-SOVITS" {
+            if !source.preset.is_empty() {
+                body["preset"] = json!(source.preset);
+            }
+        } else {
+            body["length"] = json!(1.0_f32 / rate);
+        }
+        (format!("voice/{endpoint}"), body)
+    };
+    let response = custom_tts_request(&source, api_key, &path, Some(body)).await?;
+    let status = response.status();
+    if !status.is_success() {
+        let detail = response.text().await.unwrap_or_default().chars().take(300).collect::<String>();
+        return Err(if detail.trim().is_empty() {
+            format!("Custom TTS synthesis returned HTTP {status}.")
+        } else {
+            format!("Custom TTS synthesis returned HTTP {status}: {detail}")
+        });
+    }
+    let content_type = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok())
+        .unwrap_or_default().to_ascii_lowercase();
+    if !(content_type.starts_with("audio/") || content_type.contains("octet-stream")) {
+        return Err("The custom TTS source did not return an audio response. Check its endpoint and configuration.".to_string());
+    }
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read the custom TTS audio: {error}"))?;
+    if bytes.is_empty() || bytes.len() > 25 * 1024 * 1024 {
+        return Err("The custom TTS source returned empty audio or audio larger than 25 MB.".to_string());
+    }
+    if source.format == "wav" && (bytes.len() <= 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE") {
+        return Err("The custom TTS source did not return a valid WAV file.".to_string());
+    }
+    Ok(STANDARD.encode(bytes))
+}
+
+#[tauri::command]
 pub async fn tts_synthesize(
     engine: String,
     text: String,
@@ -1254,6 +1563,8 @@ pub async fn tts_synthesize(
     rate: f32,
     pitch: f32,
     options: TtsSynthesisOptions,
+    custom_source: Option<TtsCustomSource>,
+    custom_key: Option<String>,
 ) -> Result<String, String> {
     if text.trim().is_empty() {
         return Err("There is no text to synthesize.".to_string());
@@ -1261,6 +1572,13 @@ pub async fn tts_synthesize(
     let rate = if rate.is_finite() { rate.clamp(0.25, 4.0) } else { 1.0 };
     if engine == "system" {
         return tts_system_synthesize(text, voice, rate, pitch).await;
+    }
+    if engine.starts_with("custom:") {
+        let source = custom_source.ok_or_else(|| "Select and configure a custom TTS source first.".to_string())?;
+        if source.id != engine {
+            return Err("The selected custom TTS source does not match the active provider.".to_string());
+        }
+        return tts_custom_synthesize(&source, custom_key.as_deref().unwrap_or(""), &text, &voice, rate).await;
     }
     let client = request_client()?;
 
@@ -1295,5 +1613,44 @@ pub async fn tts_synthesize(
         "microsoftTranslator" => tts_translator_synthesize(&client, &text, &voice, rate, pitch, &options).await,
         "googleCloud" => tts_google_cloud_synthesize(&client, &api_key, &text, &voice, rate, pitch, &options).await,
         _ => Err("Unsupported TTS engine.".to_string()),
+    }
+}
+
+
+#[cfg(test)]
+mod custom_tts_validation_tests {
+    use super::{custom_tts_base_url, validate_custom_tts_source, TtsCustomSource};
+
+    #[test]
+    fn custom_base_url_preserves_proxy_prefix_and_adds_trailing_slash() {
+        let url = custom_tts_base_url("http://127.0.0.1:8088/proxy/v1").unwrap();
+        assert_eq!(url.as_str(), "http://127.0.0.1:8088/proxy/v1/");
+    }
+
+    #[test]
+    fn custom_base_url_rejects_public_cleartext_http() {
+        assert!(custom_tts_base_url("http://example.com/v1").is_err());
+        assert!(custom_tts_base_url("https://example.com/v1").is_ok());
+        assert!(custom_tts_base_url("http://192.168.1.10:8080/v1").is_ok());
+    }
+
+    #[test]
+    fn custom_base_url_rejects_credentials_query_and_fragment() {
+        assert!(custom_tts_base_url("https://user:pass@example.com/v1").is_err());
+        assert!(custom_tts_base_url("https://example.com/v1?token=secret").is_err());
+        assert!(custom_tts_base_url("https://example.com/v1#fragment").is_err());
+    }
+
+    #[test]
+    fn custom_source_normalizes_default_format() {
+        let source = TtsCustomSource {
+            id: "custom:test".to_string(),
+            name: "Test".to_string(),
+            protocol: "openAi".to_string(),
+            base_url: "https://example.com/v1".to_string(),
+            model: "".to_string(),
+            ..TtsCustomSource::default()
+        };
+        assert_eq!(validate_custom_tts_source(&source).unwrap().format, "mp3");
     }
 }

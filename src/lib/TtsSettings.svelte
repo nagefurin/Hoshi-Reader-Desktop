@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsEngine, type TtsSynthesisOptions } from "./ttsConfig.svelte";
+  import TtsCustomSources from "./TtsCustomSources.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
   import SettingToggle from "./SettingToggle.svelte";
@@ -303,6 +304,13 @@
       <option value="microsoftTranslator">Microsoft Translator</option>
       <option value="googleCloud">Google Cloud Text-to-Speech</option>
       <option value="googleTranslate">Google Translate (online)</option>
+      {#if ttsConfig.customSources.length > 0}
+        <optgroup label="Custom online sources">
+          {#each ttsConfig.customSources as source (source.id)}
+            <option value={source.id}>{source.name || source.baseUrl || source.id}</option>
+          {/each}
+        </optgroup>
+      {/if}
     </select>
   </SettingRow>
 
@@ -441,7 +449,9 @@
   {/if}
 </SettingsSection>
 
-{#if !["device", "googleTranslate"].includes(ttsConfig.engine)}
+<TtsCustomSources compact={compact} />
+
+{#if !["device", "googleTranslate"].includes(ttsConfig.engine) && !ttsConfig.engine.startsWith("custom:")}
   <SettingsSection compact={compact} title="Synthesis">
     <SettingRow compact={compact} label="Synthesis Volume">
       <div class="flex w-56 items-center gap-3">
@@ -555,6 +565,11 @@
 {/if}
 
 <SettingsSection compact={compact} title="Playback">
+{#if ttsConfig.engine.startsWith("custom:")}
+  <SettingRow compact={compact} label="Speech Rate">
+    <p class="text-xs text-base-content/60">Configured per source in Custom online TTS sources below.</p>
+  </SettingRow>
+{:else}
   <SettingRow compact={compact} label="Speech Rate">
     {#if ttsConfig.engine === "googleTranslate"}
       <select class="select select-sm w-36" value={Number(ttsConfig.rate) < 0.75 ? "slow" : "normal"} onchange={(event) => { ttsConfig.rate = event.currentTarget.value === "slow" ? 0.5 : 1; save(); }}>
@@ -576,6 +591,7 @@
       </div>
     {/if}
   </SettingRow>
+{/if}
   {#if ["device", "edge", "azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine) &&
       !(ttsConfig.engine === "googleCloud" && /Chirp|Journey/i.test(ttsConfig.googleCloudVoice))}
     <SettingRow compact={compact} label={ttsConfig.engine === "edge" ? "Pitch (Hz)" : ttsConfig.engine === "device" ? "Pitch" : "Pitch (semitones)"}>

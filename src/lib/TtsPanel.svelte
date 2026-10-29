@@ -339,6 +339,10 @@
   }
 
   function synthesisVoice(segment: SpokenSegment): string {
+    if (ttsConfig.engine.startsWith("custom:")) {
+      const source = ttsConfig.customSources.find((item) => item.id === ttsConfig.engine);
+      return segment.dialogue && source?.dialogueVoice ? source.dialogueVoice : (source?.narrationVoice ?? "");
+    }
     if (ttsConfig.engine === "device") return segment.dialogue && ttsConfig.dialogueVoice ? ttsConfig.dialogueVoice : ttsConfig.voice;
     if (ttsConfig.engine === "edge") return segment.dialogue ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice) : ttsConfig.edgeVoice;
     if (ttsConfig.engine === "azure") return segment.dialogue ? (ttsConfig.azureDialogueVoice || ttsConfig.azureVoice) : ttsConfig.azureVoice;
@@ -362,6 +366,8 @@
       ttsConfig.googleCloudDialogueVoice,
       ttsConfig.providerOptions[ttsConfig.engine],
       ttsRuntime.azureKey, ttsRuntime.googleCloudKey,
+      ttsConfig.customSources.find((source) => source.id === ttsConfig.engine),
+      ttsRuntime.customKeys[ttsConfig.engine] ?? "",
     ]);
   }
 
@@ -373,6 +379,8 @@
     if (existing?.fingerprint === fingerprint) return existing.promise;
 
     let promise: Promise<string>;
+    const customSource = ttsConfig.customSources.find((source) => source.id === ttsConfig.engine) ?? null;
+    const customKey = ttsRuntime.customKeys[ttsConfig.engine] ?? "";
     promise = invoke<string>("tts_synthesize", {
       engine: ttsConfig.engine === "device" && usesNativeWindowsSpeech ? "system" : ttsConfig.engine,
       text: segment.text,
@@ -383,9 +391,11 @@
           ? ttsRuntime.googleCloudKey
           : "",
       voice: synthesisVoice(segment),
-      rate: Number(ttsConfig.rate) || 1,
+      rate: Number(customSource?.rate ?? ttsConfig.rate) || 1,
       pitch: Number(ttsConfig.pitch) || 0,
-      options: ttsConfig.providerOptions[ttsConfig.engine],
+      options: ttsConfig.providerOptions[ttsConfig.engine] ?? ttsConfig.providerOptions.edge,
+      customSource,
+      customKey,
     }).catch((error) => {
       if (audioCache.get(segmentIndex)?.promise === promise) audioCache.delete(segmentIndex);
       throw error;
@@ -561,9 +571,11 @@
       if (token !== runId) return;
       const audioFormat = ttsConfig.engine === "device" && usesNativeWindowsSpeech
         ? "wav"
-        : ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)
-          ? ttsConfig.providerOptions[ttsConfig.engine]?.format ?? "mp3"
-          : "mp3";
+        : ttsConfig.engine.startsWith("custom:")
+          ? (ttsConfig.customSources.find((source) => source.id === ttsConfig.engine)?.format ?? "mp3")
+          : ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)
+            ? ttsConfig.providerOptions[ttsConfig.engine]?.format ?? "mp3"
+            : "mp3";
       const mimeType = audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
       const audio = new Audio("data:" + mimeType + ";base64," + encoded);
       audio.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
@@ -661,7 +673,9 @@
           ttsConfig.engine === "azure" ? "Microsoft Azure Speech" :
           ttsConfig.engine === "microsoftTranslator" ? "Microsoft Translator" :
           ttsConfig.engine === "googleCloud" ? "Google Cloud Text-to-Speech" :
-          "Google Translate"}
+          (ttsConfig.engine.startsWith("custom:")
+            ? (ttsConfig.customSources.find((source) => source.id === ttsConfig.engine)?.name || "Custom online source")
+            : "Google Translate")}
       </p>
     </div>
   </div>

@@ -149,6 +149,8 @@ pub fn run() {
             tts::tts_azure_voices,
             tts::tts_microsoft_translator_voices,
             tts::tts_google_cloud_voices,
+            tts::tts_custom_voices,
+            tts::tts_custom_models,
             tts::tts_synthesize,
             #[cfg(windows)]
             media_controls::media_controls_metadata,
