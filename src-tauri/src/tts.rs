@@ -45,8 +45,8 @@ static RE_RUBY_READING: LazyLock<Regex> = LazyLock::new(|| {
 static RE_NUMERIC_ENTITY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"&#(x[0-9a-fA-F]+|[0-9]+);").unwrap());
 static RE_IMAGE_TAG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)<(?:img|image)\\b[^>]*>").unwrap());
-const IMAGE_MARKER: char = '\\u{E000}';
+    LazyLock::new(|| Regex::new(r"(?i)<(?:img|image)\b[^>]*>").unwrap());
+const IMAGE_MARKER: char = '\u{E000}';
 
 fn decode_entities(value: &str) -> String {
     let decoded = RE_NUMERIC_ENTITY.replace_all(value, |captures: &Captures<'_>| {
@@ -89,7 +89,7 @@ fn speakable_text(html: &str, use_ruby_readings: bool) -> String {
 fn speakable_text_with_images(html: &str) -> (String, Vec<usize>) {
     let body = library::body(html);
     let marked = RE_IMAGE_TAG.replace_all(body, IMAGE_MARKER.to_string());
-    let with_breaks = RE_BLOCK.replace_all(&marked, "\\n");
+    let with_breaks = RE_BLOCK.replace_all(&marked, "\n");
     let decoded = decode_entities(&with_breaks);
     let plain = library::strip(&decoded);
     let formatted = plain
@@ -97,7 +97,7 @@ fn speakable_text_with_images(html: &str) -> (String, Vec<usize>) {
         .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
-        .join("\\n\\n");
+        .join("\n\n");
     let mut text = String::with_capacity(formatted.len());
     let mut image_offsets = Vec::new();
     let mut character_count = 0usize;
