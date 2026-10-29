@@ -389,6 +389,7 @@
         errorMessage = String(error);
         active = false;
         paused = false;
+        sessionActive = false;
       }
     } finally {
       if (token === runId) loading = false;
@@ -433,8 +434,9 @@
 
     if (ttsConfig.engine === "device") {
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-        errorMessage = "System speech synthesis is not available in this webview.";
+        errorMessage = "System speech synthesis is not available in this WebView.";
         active = false;
+        sessionActive = false;
         return;
       }
       const utterance = new SpeechSynthesisUtterance(segment.text);
@@ -442,9 +444,10 @@
       const japaneseVoices = window.speechSynthesis.getVoices()
         .filter((voice) => voice.lang.trim().toLowerCase().startsWith("ja"));
       if (japaneseVoices.length === 0) {
-        errorMessage = "No Japanese system speech voice is available in this WebView. Install a Japanese Windows speech voice, then refresh the voices in TTS settings. Microsoft Edge (online) is an alternative.";
+        errorMessage = "No Japanese system speech voice is available in this WebView. Install the Japanese Windows Speech language feature, then refresh TTS voices. Narrator-only natural voices may not be exposed to WebView speech synthesis. Microsoft Edge (online) is an alternative.";
         active = false;
         paused = false;
+        sessionActive = false;
         onClearHighlight();
         return;
       }
@@ -464,6 +467,7 @@
         errorMessage = "System TTS error: " + event.error;
         active = false;
         paused = false;
+        sessionActive = false;
         onClearHighlight();
       };
       currentUtterance = utterance;
@@ -491,6 +495,7 @@
         errorMessage = "The generated audio could not be played.";
         active = false;
         paused = false;
+        sessionActive = false;
         onClearHighlight();
       };
       currentAudio = audio;
@@ -501,6 +506,7 @@
         errorMessage = String(error);
         active = false;
         paused = false;
+        sessionActive = false;
         onClearHighlight();
       }
     }
