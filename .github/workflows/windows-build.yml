@@ -43,6 +43,7 @@ jobs:
         run: pnpm check
 
       - name: Build Windows installer
+        shell: bash
         run: pnpm tauri build --no-sign --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Upload Windows installer
