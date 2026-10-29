@@ -97,7 +97,7 @@ fn default_enabled() -> bool {
 }
 
 pub(crate) fn dictionaries_dir(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir().unwrap().join(DICTIONARIES_DIR)
+    crate::library::app_dir(app).join(DICTIONARIES_DIR)
 }
 
 fn dictionary_settings_dir(app: &AppHandle) -> PathBuf {

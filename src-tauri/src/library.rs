@@ -354,8 +354,50 @@ pub(crate) fn app_dir(app: &AppHandle) -> PathBuf {
     }
 }
 
-// Copy only compatible native settings. Library data and the Google Drive cache
-// must remain independent so the original app and fork can run at the same time.
+// Copy a directory into a temporary sibling, then rename it into place so an
+// interrupted first launch does not leave an incomplete portable asset folder.
+fn copy_directory_contents(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            copy_directory_contents(&source_path, &destination_path)?;
+        } else if kind.is_file() {
+            fs::copy(&source_path, &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_directory_once(source: &Path, destination: &Path) -> std::io::Result<()> {
+    if destination.is_dir() || !source.is_dir() {
+        return Ok(());
+    }
+    if destination.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "Portable asset destination exists but is not a directory",
+        ));
+    }
+
+    let name = destination.file_name().and_then(|value| value.to_str()).unwrap_or("assets");
+    let temporary = destination.with_file_name(format!("{name}.importing"));
+    if temporary.exists() {
+        fs::remove_dir_all(&temporary)?;
+    }
+    copy_directory_contents(source, &temporary)?;
+    if destination.exists() {
+        fs::remove_dir_all(&temporary)?;
+        return Ok(());
+    }
+    fs::rename(temporary, destination)
+}
+
+// Copy original settings at launch, while keeping mutable library and asset data
+// independent so the original app and fork can run side by side.
 pub(crate) fn import_original_settings(app: &AppHandle) -> std::io::Result<()> {
     #[cfg(windows)]
     {
@@ -365,6 +407,11 @@ pub(crate) fn import_original_settings(app: &AppHandle) -> std::io::Result<()> {
             .map_err(std::io::Error::other)?;
         let fork_dir = app_dir(app);
         if original_dir != fork_dir {
+            // Seed local dictionary/font assets once. Updates and deletions from the
+            // fork then affect only its portable data folder.
+            copy_directory_once(&original_dir.join("Dictionaries"), &fork_dir.join("Dictionaries"))?;
+            copy_directory_once(&original_dir.join("Fonts"), &fork_dir.join("Fonts"))?;
+
             let source = original_dir.join("anki_config.json");
             if source.is_file() {
                 let contents = fs::read(&source)?;
