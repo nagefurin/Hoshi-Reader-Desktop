@@ -269,7 +269,7 @@
       const availableVoices = window.speechSynthesis.getVoices();
       const voiceUri = segment.dialogue && ttsConfig.dialogueVoice ? ttsConfig.dialogueVoice : ttsConfig.voice;
       if (voiceUri) utterance.voice = availableVoices.find((voice) => voice.voiceURI === voiceUri) ?? null;
-      utterance.rate = Math.min(3, Math.max(0.5, Number(ttsConfig.rate) || 1));
+      utterance.rate = Math.min(3, Math.max(0.5, (Number(ttsConfig.rate) || 1) * (Number(ttsConfig.playbackRate) || 1)));
       utterance.pitch = Math.min(2, Math.max(0.5, Number(ttsConfig.pitch) || 1));
       utterance.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
       utterance.onend = () => {
@@ -297,7 +297,11 @@
         baseUrl: ttsConfig.endpoint,
         apiKey: ttsRuntime.apiKey,
         model: ttsConfig.model,
-        voice: ttsConfig.engine === "edge" ? ttsConfig.edgeVoice : ttsConfig.remoteVoice,
+        voice: segment.dialogue
+          ? ttsConfig.engine === "edge"
+            ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice)
+            : (ttsConfig.remoteDialogueVoice || ttsConfig.remoteVoice)
+          : ttsConfig.engine === "edge" ? ttsConfig.edgeVoice : ttsConfig.remoteVoice,
         rate: Number(ttsConfig.rate) || 1,
         pitch: Number(ttsConfig.pitch) || 0,
         vitsModel: ttsConfig.vitsModel,
@@ -306,6 +310,7 @@
       if (token !== runId) return;
       const audio = new Audio("data:audio/mpeg;base64," + encoded);
       audio.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
+      audio.playbackRate = Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
       audio.onended = () => {
         if (token !== runId || !active || paused) return;
         position = segmentIndex + 1;
