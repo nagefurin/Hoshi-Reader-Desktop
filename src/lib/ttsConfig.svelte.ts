@@ -9,6 +9,47 @@ export type TtsReplacement = {
   bookId?: string;
 };
 
+export type TtsSynthesisOptions = {
+  volume: number;
+  style: string;
+  styleDegree: number;
+  role: string;
+  leadingMs: number;
+  trailingMs: number;
+  commaMs: number;
+  semicolonMs: number;
+  enumerationCommaMs: number;
+  sentenceBoundaryMs: number;
+  format: "mp3" | "wav";
+  sampleRate: 16000 | 24000 | 48000;
+  effectsProfile: string;
+};
+
+const defaultSynthesisOptions: TtsSynthesisOptions = {
+  volume: 0,
+  style: "",
+  styleDegree: 1,
+  role: "",
+  leadingMs: -1,
+  trailingMs: -1,
+  commaMs: -1,
+  semicolonMs: -1,
+  enumerationCommaMs: -1,
+  sentenceBoundaryMs: -1,
+  format: "mp3",
+  sampleRate: 24000,
+  effectsProfile: "",
+};
+
+const providerOptions = () => ({
+  edge: { ...defaultSynthesisOptions },
+  azure: { ...defaultSynthesisOptions },
+  microsoftTranslator: { ...defaultSynthesisOptions },
+  googleCloud: { ...defaultSynthesisOptions },
+  googleTranslate: { ...defaultSynthesisOptions },
+  openAi: { ...defaultSynthesisOptions },
+});
+
 export type TtsConfig = {
   engine: TtsEngine;
   voice: string;
@@ -34,6 +75,7 @@ export type TtsConfig = {
   microsoftTranslatorDialogueVoice: string;
   googleCloudVoice: string;
   googleCloudDialogueVoice: string;
+  providerOptions: Record<string, TtsSynthesisOptions>;
   replacements: TtsReplacement[];
 };
 
@@ -62,6 +104,7 @@ const defaults: TtsConfig = {
   microsoftTranslatorDialogueVoice: "",
   googleCloudVoice: "ja-JP-Neural2-B",
   googleCloudDialogueVoice: "",
+  providerOptions: providerOptions(),
   replacements: [],
 };
 
