@@ -353,6 +353,18 @@
       <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.playbackRate).toFixed(1)}x</span>
     </div>
   </SettingRow>
+  <SettingRow compact={compact} label="Preload Sentences">
+    <div class="flex w-56 items-center gap-3">
+      <input class="range range-xs flex-1" type="range" min="1" max="10" step="1" bind:value={ttsConfig.prefetchSentences} oninput={save} />
+      <span class="w-10 text-right text-xs tabular-nums">{Math.round(Number(ttsConfig.prefetchSentences))}</span>
+    </div>
+  </SettingRow>
+  <SettingRow compact={compact} label="Extra Sentence Pause">
+    <div class="flex w-56 items-center gap-3">
+      <input class="range range-xs flex-1" type="range" min="0" max="2000" step="10" bind:value={ttsConfig.sentencePauseMs} oninput={save} />
+      <span class="w-12 text-right text-xs tabular-nums">{Math.round(Number(ttsConfig.sentencePauseMs))} ms</span>
+    </div>
+  </SettingRow>
   <SettingRow compact={compact} label="Volume">
     <div class="flex w-56 items-center gap-3">
       <input class="range range-xs flex-1" type="range" min="0" max="1" step="0.05" bind:value={ttsConfig.volume} oninput={save} />
