@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { AudioLines, Pause, Play, Repeat, SkipBack, SkipForward, Square } from "@lucide/svelte";
   import { ttsConfig, ttsRuntime } from "./ttsConfig.svelte";
@@ -72,6 +72,8 @@
   let audioCache = new Map<number, { fingerprint: string; promise: Promise<string> }>();
   let pendingNextPosition: number | null = null;
   let waitingBetweenSentences = false;
+  let sessionStartIndex = 0;
+  let lastRubySetting = ttsConfig.useRubyReadings;
 
   $effect(() => {
     const shouldPauseForLookup = lookupActive && sasayakiConfig.sasayakiAutoPause;
@@ -95,6 +97,40 @@
 
   const currentSegment = $derived(segments[position] ?? null);
   const progressText = $derived(segments.length ? (Math.min(position + 1, segments.length) + " / " + segments.length) : "—");
+
+  $effect(() => {
+    const useRubyReadings = ttsConfig.useRubyReadings;
+    untrack(() => {
+      if (useRubyReadings === lastRubySetting) return;
+      lastRubySetting = useRubyReadings;
+      if (!chapters.length) return;
+
+      const previousPosition = position;
+      const previousSegment = segments[previousPosition];
+      const wasActive = active;
+      const wasPaused = paused;
+      segments = buildSegments(chapters, sessionStartIndex);
+      audioCache.clear();
+
+      const matches = segments
+        .map((segment, index) => ({ segment, index }))
+        .filter(({ segment }) =>
+          previousSegment &&
+          segment.chapterIndex === previousSegment.chapterIndex &&
+          segment.sourceText === previousSegment.sourceText,
+        );
+      position = matches.length
+        ? matches.reduce((best, current) =>
+            Math.abs(current.index - previousPosition) < Math.abs(best.index - previousPosition) ? current : best,
+          ).index
+        : Math.min(previousPosition, Math.max(segments.length - 1, 0));
+
+      if (wasActive && segments.length) {
+        jumpTo(position);
+        if (wasPaused) pausePlayback();
+      }
+    });
+  });
 
   function applyReplacements(text: string) {
     let value = text;
@@ -327,6 +363,7 @@
 
   async function playFrom(startIndex: number) {
     const token = cancelCurrent();
+    sessionStartIndex = startIndex;
     active = false;
     paused = false;
     loading = true;
