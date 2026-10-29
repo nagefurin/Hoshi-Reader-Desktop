@@ -1259,10 +1259,12 @@ pub async fn tts_synthesize(
         return Err("There is no text to synthesize.".to_string());
     }
     let rate = if rate.is_finite() { rate.clamp(0.25, 4.0) } else { 1.0 };
+    if engine == "system" {
+        return tts_system_synthesize(text, voice, rate, pitch).await;
+    }
     let client = request_client()?;
 
     match engine.as_str() {
-        "system" => tts_system_synthesize(text, voice, rate, pitch).await,
         "edge" => {
             let bytes = tts_edge_synthesize(&text, &voice, rate, pitch, &options).await?;
             Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
