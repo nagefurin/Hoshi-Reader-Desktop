@@ -35,6 +35,8 @@ use windows::{
     core::HSTRING,
     Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_SINGLETHREADED},
 };
+#[cfg(windows)]
+use windows_future::AsyncStatus;
 
 use crate::{book, library};
 
