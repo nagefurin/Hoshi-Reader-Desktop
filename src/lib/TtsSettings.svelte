@@ -67,6 +67,7 @@
   });
 
   let voices = $state<SpeechSynthesisVoice[]>([]);
+  let systemVoiceCount = $state(0);
   let edgeVoices = $state<TtsVoiceInfo[]>([]);
   let edgeVoiceLoading = $state(false);
   let edgeVoiceError = $state("");
@@ -197,19 +198,35 @@
     if ((ttsConfig.engine as string) === "vits") changeEngine("device");
   });
 
+  function refreshSystemVoices() {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const listed = window.speechSynthesis.getVoices();
+    systemVoiceCount = listed.length;
+    voices = listed
+      .filter((voice) => voice.lang.trim().toLowerCase().startsWith("ja"))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    // Never leave an English voice silently selected for Japanese text.
+    if (listed.length > 0) {
+      let changed = false;
+      if (ttsConfig.voice && !voices.some((voice) => voice.voiceURI === ttsConfig.voice)) {
+        ttsConfig.voice = "";
+        changed = true;
+      }
+      if (ttsConfig.dialogueVoice && !voices.some((voice) => voice.voiceURI === ttsConfig.dialogueVoice)) {
+        ttsConfig.dialogueVoice = "";
+        changed = true;
+      }
+      if (changed) saveTtsConfig();
+    }
+  }
+
   $effect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const speech = window.speechSynthesis;
-    const refresh = () => {
-      voices = speech.getVoices().slice().sort((a, b) => {
-        const aJapanese = a.lang.toLowerCase().startsWith("ja") ? 0 : 1;
-        const bJapanese = b.lang.toLowerCase().startsWith("ja") ? 0 : 1;
-        return aJapanese - bJapanese || a.name.localeCompare(b.name);
-      });
-    };
-    refresh();
-    speech.addEventListener("voiceschanged", refresh);
-    return () => speech.removeEventListener("voiceschanged", refresh);
+    refreshSystemVoices();
+    speech.addEventListener("voiceschanged", refreshSystemVoices);
+    return () => speech.removeEventListener("voiceschanged", refreshSystemVoices);
   });
 
   function save() {
@@ -242,7 +259,7 @@
   {#if ttsConfig.engine === "device"}
     <SettingRow compact={compact} label="Narration Voice">
       <select class="select select-sm w-52" bind:value={ttsConfig.voice} onchange={save}>
-        <option value="">System default</option>
+        <option value="">Automatic Japanese voice</option>
         {#each voices as voice (voice.voiceURI)}
           <option value={voice.voiceURI}>{voice.name} ({voice.lang})</option>
         {/each}
@@ -257,7 +274,19 @@
       </select>
     </SettingRow>
     {#if voices.length === 0}
-      <p class="text-xs text-base-content/60">No system voices have been listed yet. Install a voice for your language in the operating system's speech settings.</p>
+      <div class="flex flex-col items-start gap-2">
+        <p class="text-xs text-warning">
+          {systemVoiceCount === 0
+            ? "No system voices are listed yet. Refresh after Windows finishes loading speech services."
+            : `Windows exposes ${systemVoiceCount} system voice(s), but none is Japanese. Device TTS cannot pronounce Japanese correctly without an installed Japanese speech voice.`}
+        </p>
+        {#if systemVoiceCount > 0}
+          <p class="text-xs text-base-content/60">
+            In Windows, install a Japanese speech voice under Settings → Time & language → Language & region → Japanese → Language options → Speech, then refresh the voices and restart Hoshi if it still does not appear. Microsoft Edge (online) works without a local voice.
+          </p>
+        {/if}
+        <button class="btn btn-outline btn-xs" onclick={refreshSystemVoices}>Refresh system voices</button>
+      </div>
     {/if}
   {:else if ttsConfig.engine === "edge"}
     <SettingRow compact={compact} label="Narration Voice">
