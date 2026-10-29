@@ -230,9 +230,11 @@
                 imageCursor++;
               }
 
-              const speech = sourceChunks.length === 1
-                ? (spokenChunks.length === 1 ? spokenChunks[0].trim() : spokenSentence.trim())
-                : source;
+              const speech = spokenChunks.length === sourceChunks.length
+                ? spokenChunks[chunkIndex].trim()
+                : sourceChunks.length === 1
+                  ? spokenSentence.trim()
+                  : source;
               result.push({
                 chapterIndex: chapter.spineIndex,
                 chapterTitle: chapter.title,
