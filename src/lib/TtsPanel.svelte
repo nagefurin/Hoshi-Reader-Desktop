@@ -102,9 +102,10 @@
       if (chapter.spineIndex < startIndex) continue;
       const prepared = applyReplacements(chapter.text);
       for (const paragraph of prepared.split(/\n+/u)) {
-        for (const sentence of sentenceParts(paragraph)) {
-          for (const part of splitQuoted(sentence)) {
-            for (const text of splitLong(part.text)) {
+        // Split the full paragraph first so punctuation inside Japanese quotes keeps its dialogue voice.
+        for (const part of splitQuoted(paragraph)) {
+          for (const sentence of sentenceParts(part.text)) {
+            for (const text of splitLong(sentence)) {
               if (text.trim()) result.push({
                 chapterIndex: chapter.spineIndex,
                 chapterTitle: chapter.title,
