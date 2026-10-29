@@ -5,6 +5,8 @@ export type TtsReplacement = {
   id: string;
   pattern: string;
   replacement: string;
+  regex?: boolean;
+  bookId?: string;
 };
 
 export type TtsConfig = {
