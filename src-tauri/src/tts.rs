@@ -508,6 +508,31 @@ async fn tts_google_cloud_synthesize(
     Ok(STANDARD.encode(audio))
 }
 
+async fn tts_translator_synthesize(
+    client: &Client, text: &str, voice: &str, rate: f32, pitch: f32,
+) -> Result<String, String> {
+    let mut attempt = 0;
+    loop {
+        let token = microsoft_translator_token(client).await?;
+        let mut url = azure_base(&token.region)?;
+        url.set_path("/cognitiveservices/v1");
+        let response = client.post(url)
+            .bearer_auth(&token.bearer)
+            .header("X-Microsoft-OutputFormat", "audio-24khz-96kbitrate-mono-mp3")
+            .header("User-Agent", "Hoshi Reader Desktop")
+            .header(CONTENT_TYPE, "application/ssml+xml")
+            .body(azure_ssml(text, voice, rate, pitch))
+            .send().await
+            .map_err(|error| format!("Could not connect to Microsoft Translator TTS: {error}"))?;
+        if response.status().as_u16() == 401 && attempt == 0 {
+            *MICROSOFT_TRANSLATOR_TOKEN.lock().await = None;
+            attempt += 1;
+            continue;
+        }
+        return finish_audio(response).await;
+    }
+}
+
 fn google_translate_body(text: &str, slow: bool) -> String {
     let params = json!([text, "ja", if slow { Value::Bool(true) } else { Value::Null }, "null"]).to_string();
     json!([[["jQ1olc", params, Value::Null, "generic"]]]).to_string()
@@ -758,6 +783,21 @@ pub async fn tts_edge_voices() -> Result<Vec<String>, String> {
     tts_edge_voice_list().await
 }
 
+#[tauri::command]
+pub async fn tts_azure_voices(region: String, api_key: String) -> Result<Vec<String>, String> {
+    tts_azure_voice_list(&region, &api_key).await
+}
+
+#[tauri::command]
+pub async fn tts_microsoft_translator_voices() -> Result<Vec<String>, String> {
+    tts_translator_voice_list().await
+}
+
+#[tauri::command]
+pub async fn tts_google_cloud_voices(api_key: String) -> Result<Vec<String>, String> {
+    tts_google_cloud_voice_list(&api_key).await
+}
+
 #[cfg(test)]
 mod edge_token_tests {
     use super::edge_gec;
@@ -782,8 +822,6 @@ pub async fn tts_synthesize(
     voice: String,
     rate: f32,
     pitch: f32,
-    vits_model: String,
-    speaker_id: u32,
 ) -> Result<String, String> {
     if text.trim().is_empty() {
         return Err("There is no text to synthesize.".to_string());
@@ -797,25 +835,30 @@ pub async fn tts_synthesize(
             Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
         }
         "googleTranslate" => {
-            if text.chars().count() > 190 {
-                return Err("Google Translate TTS accepts at most 190 characters per request.".to_string());
-            }
-            let mut url = Url::parse("https://translate.google.com/translate_tts").unwrap();
-            url.query_pairs_mut()
-                .append_pair("ie", "UTF-8")
-                .append_pair("client", "tw-ob")
-                .append_pair("tl", "ja")
-                .append_pair("q", &text)
-                .append_pair("ttsspeed", if rate < 0.75 { "0.24" } else { "1.0" });
+            let request_body = google_translate_body(&text, rate < 1.0);
             let response = client
-                .get(url)
-                .header("User-Agent", "Mozilla/5.0 Hoshi-Reader-Desktop")
+                .post("https://translate.google.com/_/TranslateWebserverUi/data/batchexecute?rpcids=jQ1olc")
+                .header("User-Agent", "Mozilla/5.0")
                 .header("Referer", "https://translate.google.com/")
-                .send()
-                .await
-                .map_err(|_| "Could not connect to Google Translate TTS.".to_string())?;
-            finish_audio(response).await
+                .form(&[("f.req", request_body)])
+                .send().await
+                .map_err(|error| format!("Could not connect to Google Translate TTS: {error}"))?;
+            if !response.status().is_success() {
+                let status = response.status();
+                let detail = response.text().await.unwrap_or_default().chars().take(240).collect::<String>();
+                return Err(format!("Google Translate TTS returned HTTP {status}: {detail}"));
+            }
+            let response_text = response.text().await
+                .map_err(|error| format!("Could not read Google Translate audio response: {error}"))?;
+            let audio = google_translate_audio(&response_text)?;
+            if audio.is_empty() || audio.len() > EDGE_MAX_AUDIO_BYTES {
+                return Err("Google Translate returned empty or oversized audio.".to_string());
+            }
+            Ok(STANDARD.encode(audio))
         }
+        "azure" => tts_azure_synthesize(&client, &base_url, &api_key, &text, &voice, rate, pitch).await,
+        "microsoftTranslator" => tts_translator_synthesize(&client, &text, &voice, rate, pitch).await,
+        "googleCloud" => tts_google_cloud_synthesize(&client, &api_key, &text, &voice, rate, pitch).await,
         "openAi" => {
             let base = validate_endpoint(&base_url)?;
             if model.trim().is_empty() || voice.trim().is_empty() {
@@ -837,31 +880,6 @@ pub async fn tts_synthesize(
                 .send()
                 .await
                 .map_err(|_| "Could not connect to the configured OpenAI-compatible TTS endpoint.".to_string())?;
-            finish_audio(response).await
-        }
-        "vits" => {
-            let base = validate_endpoint(&base_url)?;
-            let model = match vits_model.as_str() {
-                "vits" | "w2v2-vits" | "bert-vits2" | "gpt-sovits" => vits_model.as_str(),
-                _ => return Err("Choose a supported VITS model.".to_string()),
-            };
-            let endpoint = endpoint_url(base, &format!("voice/{model}"));
-            let mut request = client.post(endpoint).json(&json!({
-                "text": text,
-                "id": speaker_id,
-                "lang": "ja",
-                "format": "mp3",
-                "streaming": false,
-                "length": 1.0 / rate
-            }));
-            if !api_key.trim().is_empty() {
-                request = request.header("X-API-KEY", api_key.trim());
-            }
-            let response = request
-                .header("Accept", "audio/mpeg, audio/*")
-                .send()
-                .await
-                .map_err(|_| "Could not connect to the configured VITS endpoint.".to_string())?;
             finish_audio(response).await
         }
         _ => Err("Unsupported TTS engine.".to_string()),
