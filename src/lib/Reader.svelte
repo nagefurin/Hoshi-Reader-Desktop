@@ -1173,10 +1173,10 @@
   }
 
   let pendingSearchHighlight: { character: number; length: number } | null = null;
-  let pendingTtsHighlight: { chapterIndex: number; text: string } | null = null;
+  let ttsCurrentHighlight: { chapterIndex: number; text: string } | null = null;
 
   function onTtsReadSegment(spineIndex: number, text: string) {
-    pendingTtsHighlight = { chapterIndex: spineIndex, text };
+    ttsCurrentHighlight = { chapterIndex: spineIndex, text };
     if (spineIndex !== index) {
       const chapter = bookInfo.chapterInfo[spine[spineIndex]];
       const progress = continuous && chapter && bookInfo.characterCount > 0
@@ -1186,12 +1186,11 @@
       return;
     }
     if (loading) return;
-    pendingTtsHighlight = null;
     postToFrame({ hoshi: "tts-highlight", text, reveal: true });
   }
 
   function clearTtsHighlight() {
-    pendingTtsHighlight = null;
+    ttsCurrentHighlight = null;
     postToFrame({ hoshi: "tts-clear" });
   }
 
@@ -1482,10 +1481,8 @@
           postToFrame({ hoshi: "search-highlight", spine: index, offset: pendingSearchHighlight.character - chapter.currentTotal, length: pendingSearchHighlight.length });
           pendingSearchHighlight = null;
         }
-        if (pendingTtsHighlight?.chapterIndex === index) {
-          const { text } = pendingTtsHighlight;
-          pendingTtsHighlight = null;
-          postToFrame({ hoshi: "tts-highlight", text, reveal: true });
+        if (ttsCurrentHighlight?.chapterIndex === index) {
+          postToFrame({ hoshi: "tts-highlight", text: ttsCurrentHighlight.text, reveal: true });
         }
         sasayaki?.handleRestoreCompleted(index);
         if (pageAdvance) postToFrame({ hoshi: "page-cues", play: pendingPagePlayback });
