@@ -29,7 +29,7 @@ Download the `.dmg` for macOS 15+ (Apple Silicon) or the `-setup.exe` for Window
 - Vertical (縦書き) and horizontal (横書き) text
 - Pop-up dictionary with support for Yomitan term, frequency, pitch and kanji dictionaries
 - Audio support for local and remote sources
-- Text-to-speech ported from Android: system voices, Microsoft Edge, Azure Speech, Microsoft Translator, Google Cloud Text-to-Speech, Google Translate, and OpenAI-compatible custom endpoints; includes ruby readings, dialogue voice routing, sentence preloading, playback speed, sentence pauses, reader auto-scroll, lookup pause, image hold, and a pronunciation dictionary.
+- Text-to-speech ported from Android: system voices, Microsoft Edge, Azure Speech, Microsoft Translator, Google Cloud Text-to-Speech, and Google Translate; includes ruby readings, dialogue voice routing, sentence preloading, playback speed, sentence pauses, reader auto-scroll, lookup pause, image hold, and a pronunciation dictionary.
 - Sasayaki (audiobooks)
 - Reading statistics
 - Mining using AnkiConnect (mainly supports handlebars used by [Lapis](https://github.com/donkuri/lapis#how-to-use-lapis))
