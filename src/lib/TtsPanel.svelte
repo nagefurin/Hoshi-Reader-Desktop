@@ -216,7 +216,7 @@
 
   function synthesisFingerprint(): string {
     return JSON.stringify([
-      ttsConfig.engine, ttsConfig.endpoint, ttsConfig.model, ttsConfig.rate, ttsConfig.pitch,
+      ttsConfig.engine, ttsConfig.rate, ttsConfig.pitch,
       ttsConfig.edgeVoice, ttsConfig.edgeDialogueVoice, ttsConfig.azureRegion,
       ttsConfig.azureVoice, ttsConfig.azureDialogueVoice, ttsConfig.microsoftTranslatorVoice,
       ttsConfig.microsoftTranslatorDialogueVoice, ttsConfig.googleCloudVoice,
