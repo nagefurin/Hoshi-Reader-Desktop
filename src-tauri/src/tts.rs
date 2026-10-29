@@ -161,7 +161,7 @@ fn speakable_text_with_images(html: &str) -> (String, Vec<usize>) {
     let decoded = decode_entities(&with_breaks);
     let plain = library::strip(&decoded);
     let formatted = plain
-        .split('\\n')
+        .split('\n')
         .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
