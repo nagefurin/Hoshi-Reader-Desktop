@@ -11,7 +11,7 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{
         client::IntoClientRequest,
-        http::header::{COOKIE, ORIGIN, USER_AGENT},
+        http::header::{CACHE_CONTROL, COOKIE, ORIGIN, PRAGMA, USER_AGENT},
         http::HeaderValue,
         protocol::Message,
     },
@@ -378,6 +378,8 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32) -> 
     request.headers_mut().insert(USER_AGENT, HeaderValue::from_static(EDGE_USER_AGENT));
     request.headers_mut().insert(ORIGIN, HeaderValue::from_static(EDGE_ORIGIN));
     request.headers_mut().insert(COOKIE, edge_cookie()?);
+    request.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    request.headers_mut().insert(PRAGMA, HeaderValue::from_static("no-cache"));
 
     let result = tokio::time::timeout(Duration::from_secs(60), async move {
         let (mut socket, _) = connect_async(request).await
