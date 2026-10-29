@@ -215,7 +215,8 @@
     const existing = audioCache.get(segmentIndex);
     if (existing?.fingerprint === fingerprint) return existing.promise;
 
-    const promise = invoke<string>("tts_synthesize", {
+    let promise: Promise<string>;
+    promise = invoke<string>("tts_synthesize", {
       engine: ttsConfig.engine,
       text: segment.text,
       baseUrl: ttsConfig.engine === "azure" ? ttsConfig.azureRegion : ttsConfig.endpoint,
