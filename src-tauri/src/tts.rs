@@ -207,7 +207,7 @@ fn speakable_text_with_images(html: &str) -> (String, Vec<usize>, Vec<TtsRubyRan
     let marked_ruby = RE_RUBY_BLOCK.replace_all(body, |captures: &Captures<'_>| {
         let ruby_markup = &captures[0];
         let reading = RE_RUBY_RT.captures_iter(ruby_markup)
-            .map(|capture| decode_entities(&library::strip(&capture[1])).trim().to_string())
+            .map(|capture| library::strip(&decode_entities(&capture[1])).trim().to_string())
             .collect::<Vec<_>>()
             .join("");
         let without_rt = RE_RUBY_RT.replace_all(ruby_markup, "");
