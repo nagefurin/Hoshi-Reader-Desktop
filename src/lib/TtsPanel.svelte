@@ -13,9 +13,12 @@
     title: string;
     text: string;
     rubyText: string;
+    rubyRanges: TtsRubyRange[];
     imageOffsets: number[];
     imageIndexStart: number;
   };
+
+  type TtsRubyRange = { start: number; end: number; reading: string };
 
   type SpokenSegment = {
     chapterIndex: number;
@@ -134,18 +137,90 @@
     });
   });
 
-  function applyReplacements(text: string) {
+  function applyRegexReplacements(text: string) {
     let value = text;
     for (const rule of ttsConfig.replacements) {
-      if (!rule.pattern || (rule.bookId && rule.bookId !== id)) continue;
+      if (!rule.pattern || (rule.bookId && rule.bookId !== id) || !(rule.regex ?? true)) continue;
       try {
-        if (rule.regex ?? true) value = value.replace(new RegExp(rule.pattern, "gu"), rule.replacement);
-        else value = value.split(rule.pattern).join(rule.replacement);
+        value = value.replace(new RegExp(rule.pattern, "gu"), rule.replacement);
       } catch {
         // An invalid regular expression is ignored, leaving the rest of the rules active.
       }
     }
     return value;
+  }
+
+  function speakableSegment(source: string, localRanges: TtsRubyRange[]): string {
+    const characters = Array.from(source);
+    const literalRules = ttsConfig.replacements
+      .filter((rule) => rule.pattern && !(rule.regex ?? true) && (!rule.bookId || rule.bookId === id))
+      .map((rule) => ({ pattern: Array.from(rule.pattern), replacement: rule.replacement, scoped: Boolean(rule.bookId) }))
+      .sort((a, b) => b.pattern.length - a.pattern.length || Number(b.scoped) - Number(a.scoped));
+
+    const ranges = ttsConfig.useRubyReadings
+      ? localRanges
+          .filter((range) => Number.isInteger(range.start) && Number.isInteger(range.end) &&
+            range.start >= 0 && range.end >= range.start && range.end <= characters.length && range.reading.trim())
+          .slice()
+          .sort((a, b) => a.start - b.start || a.end - b.end)
+      : [];
+
+    // Match Android's precedence: a literal dictionary entry wins over a ruby span
+    // if it matches anywhere inside that span; otherwise speak the span's rt reading.
+    const blockedRuby = new Set<TtsRubyRange>();
+    for (const range of ranges) {
+      if (range.end <= range.start) continue;
+      const literalInside = literalRules.some(({ pattern }) => {
+        if (!pattern.length) return false;
+        for (let at = range.start; at < range.end; at++) {
+          if (at + pattern.length <= characters.length &&
+              characters.slice(at, at + pattern.length).every((character, index) => character === pattern[index])) {
+            return true;
+          }
+        }
+        return false;
+      });
+      if (literalInside) blockedRuby.add(range);
+    }
+
+    let value = "";
+    let cursor = 0;
+    let rubyIndex = 0;
+    while (cursor <= characters.length) {
+      while (rubyIndex < ranges.length && ranges[rubyIndex].start === cursor && ranges[rubyIndex].end === cursor) {
+        value += ranges[rubyIndex].reading;
+        rubyIndex++;
+      }
+      if (cursor >= characters.length) break;
+      while (rubyIndex < ranges.length &&
+          (ranges[rubyIndex].end < cursor ||
+           (ranges[rubyIndex].start < cursor && ranges[rubyIndex].end > cursor))) {
+        rubyIndex++;
+      }
+
+      const literal = literalRules.find(({ pattern }) =>
+        pattern.length > 0 &&
+        cursor + pattern.length <= characters.length &&
+        characters.slice(cursor, cursor + pattern.length).every((character, index) => character === pattern[index]),
+      );
+      if (literal) {
+        value += literal.replacement;
+        cursor += literal.pattern.length;
+        continue;
+      }
+
+      const ruby = ranges[rubyIndex];
+      if (ruby && ruby.start === cursor && ruby.end > cursor && !blockedRuby.has(ruby)) {
+        value += ruby.reading;
+        cursor = ruby.end;
+        rubyIndex++;
+        continue;
+      }
+
+      value += characters[cursor];
+      cursor++;
+    }
+    return applyRegexReplacements(value);
   }
 
   function sentenceParts(text: string): string[] {
@@ -192,31 +267,20 @@
     for (const chapter of values) {
       if (chapter.spineIndex < startIndex) continue;
       const sourceText = chapter.text;
-      const spokenText = ttsConfig.useRubyReadings ? chapter.rubyText : chapter.text;
       const sourceParagraphs = sourceText.split(/\n+/u);
-      const spokenParagraphs = spokenText.split(/\n+/u);
       let sourceSearchFrom = 0;
       let imageCursor = 0;
       const imageOffsets = chapter.imageOffsets ?? [];
+      const rubyRanges = chapter.rubyRanges ?? [];
+      const sourceCodePointCount = Array.from(sourceText).length;
       const firstChapterSegment = result.length;
 
-      for (let paragraphIndex = 0; paragraphIndex < sourceParagraphs.length; paragraphIndex++) {
-        const paragraph = sourceParagraphs[paragraphIndex];
-        const spokenParagraph = spokenParagraphs[paragraphIndex] ?? paragraph;
+      for (const paragraph of sourceParagraphs) {
         const sourceParts = splitQuoted(paragraph);
-        const spokenParts = splitQuoted(spokenParagraph);
-
-        for (let partIndex = 0; partIndex < sourceParts.length; partIndex++) {
-          const part = sourceParts[partIndex];
-          const spokenPart = spokenParts[partIndex] ?? part;
+        for (const part of sourceParts) {
           const sourceSentences = sentenceParts(part.text);
-          const spokenSentences = sentenceParts(spokenPart.text);
-
-          for (let sentenceIndex = 0; sentenceIndex < sourceSentences.length; sentenceIndex++) {
-            const sentence = sourceSentences[sentenceIndex];
-            const spokenSentence = spokenSentences[sentenceIndex] ?? sentence;
+          for (const sentence of sourceSentences) {
             const sourceChunks = splitLong(sentence);
-            const spokenChunks = splitLong(spokenSentence);
             for (let chunkIndex = 0; chunkIndex < sourceChunks.length; chunkIndex++) {
               const source = sourceChunks[chunkIndex].trim();
               if (!source) continue;
@@ -224,23 +288,34 @@
               const sourceStart = found >= 0 ? found : sourceSearchFrom;
               if (found >= 0) sourceSearchFrom = found + source.length;
 
-              // Offsets from Rust count Unicode code points, whereas JS string indices use UTF-16.
+              // Backend ruby/image offsets count Unicode code points, not UTF-16 code units.
               const sourceCodePointStart = Array.from(sourceText.slice(0, sourceStart)).length;
+              const sourceCodePointEnd = sourceCodePointStart + Array.from(source).length;
+              const localRubyRanges = rubyRanges
+                .filter((range) => {
+                  if (range.start === range.end) {
+                    // A zero-width image-backed ruby belongs to the next segment at a shared boundary.
+                    return range.start >= sourceCodePointStart &&
+                      (range.start < sourceCodePointEnd || sourceCodePointEnd === sourceCodePointCount);
+                  }
+                  return range.start >= sourceCodePointStart && range.end <= sourceCodePointEnd;
+                })
+                .map((range) => ({
+                  start: range.start - sourceCodePointStart,
+                  end: range.end - sourceCodePointStart,
+                  reading: range.reading,
+                }));
+
               const imagesBefore: number[] = [];
               while (imageCursor < imageOffsets.length && imageOffsets[imageCursor] <= sourceCodePointStart) {
                 imagesBefore.push(continuousMode ? (chapter.imageIndexStart + imageCursor) : imageCursor);
                 imageCursor++;
               }
 
-              const speech = spokenChunks.length === sourceChunks.length
-                ? spokenChunks[chunkIndex].trim()
-                : sourceChunks.length === 1
-                  ? spokenSentence.trim()
-                  : source;
               result.push({
                 chapterIndex: chapter.spineIndex,
                 chapterTitle: chapter.title,
-                text: applyReplacements(speech),
+                text: speakableSegment(source, localRubyRanges),
                 sourceText: source,
                 imagesBefore,
                 imagesAfter: [],
