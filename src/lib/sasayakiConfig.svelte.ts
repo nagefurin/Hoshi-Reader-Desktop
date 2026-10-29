@@ -22,7 +22,7 @@ const defaults: SasayakiConfig = {
   sasayakiAutoScroll: true,
   sasayakiAutoPause: true,
   sasayakiImagePause: true,
-  sasayakiImagePauseDuration: 3,
+  sasayakiImagePauseDuration: 1,
   sasayakiPageAdvance: false,
   sasayakiBackgroundStatistics: true,
   sasayakiShowControlBar: true,
