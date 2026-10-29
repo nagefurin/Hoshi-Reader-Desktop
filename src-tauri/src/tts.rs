@@ -25,6 +25,14 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 use tokio::sync::Mutex;
 
+#[cfg(windows)]
+use windows::{
+    Foundation::AsyncStatus,
+    Media::SpeechSynthesis::SpeechSynthesizer,
+    Storage::Streams::DataReader,
+    core::{HSTRING, init_sta},
+};
+
 use crate::{book, library};
 
 #[derive(Serialize)]
@@ -44,6 +52,15 @@ pub struct TtsVoiceInfo {
     pub id: String,
     pub styles: Vec<String>,
     pub roles: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemTtsVoiceInfo {
+    pub id: String,
+    pub name: String,
+    pub language: String,
+    pub is_default: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -895,6 +912,189 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32, opt
     result
 }
 
+
+#[cfg(windows)]
+fn windows_system_voice_list() -> Result<Vec<SystemTtsVoiceInfo>, String> {
+    let _apartment = init_sta()
+        .map_err(|error| format!("Could not initialize the Windows speech apartment: {error}"))?;
+    let voices = SpeechSynthesizer::AllVoices()
+        .map_err(|error| format!("Windows could not enumerate installed speech voices: {error}"))?;
+    let default_id = SpeechSynthesizer::DefaultVoice()
+        .ok()
+        .and_then(|voice| voice.Id().ok())
+        .map(|id| id.to_string());
+    let count = voices.Size()
+        .map_err(|error| format!("Could not read the Windows speech voice list: {error}"))?;
+    let mut result = Vec::new();
+    for index in 0..count {
+        let voice = voices.GetAt(index)
+            .map_err(|error| format!("Could not read Windows speech voice {index}: {error}"))?;
+        let id = voice.Id()
+            .map_err(|error| format!("Could not read a Windows speech voice ID: {error}"))?
+            .to_string();
+        let name = voice.DisplayName()
+            .map_err(|error| format!("Could not read the name of Windows speech voice {id}: {error}"))?
+            .to_string();
+        let language = voice.Language()
+            .map_err(|error| format!("Could not read the language of Windows speech voice {id}: {error}"))?
+            .to_string();
+        result.push(SystemTtsVoiceInfo {
+            is_default: default_id.as_deref() == Some(id.as_str()),
+            id,
+            name,
+            language,
+        });
+    }
+    result.sort_by(|a, b| {
+        let a_japanese = !a.language.to_ascii_lowercase().starts_with("ja");
+        let b_japanese = !b.language.to_ascii_lowercase().starts_with("ja");
+        a_japanese.cmp(&b_japanese).then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(result)
+}
+
+#[cfg(not(windows))]
+fn windows_system_voice_list() -> Result<Vec<SystemTtsVoiceInfo>, String> {
+    Err("Native Windows speech voices are only available on Windows.".to_string())
+}
+
+#[tauri::command]
+pub async fn tts_system_voices() -> Result<Vec<SystemTtsVoiceInfo>, String> {
+    tokio::task::spawn_blocking(windows_system_voice_list)
+        .await
+        .map_err(|error| format!("Windows speech voice enumeration failed: {error}"))?
+}
+
+#[cfg(windows)]
+fn wait_for_speech_operation<T>(
+    status: impl Fn() -> windows::core::Result<AsyncStatus>,
+    result: impl FnOnce() -> windows::core::Result<T>,
+    label: &str,
+) -> Result<T, String> {
+    let start = std::time::Instant::now();
+    loop {
+        let current = status()
+            .map_err(|error| format!("{label} failed: {error}"))?;
+        match current {
+            AsyncStatus::Completed => {
+                return result().map_err(|error| format!("{label} failed: {error}"));
+            }
+            AsyncStatus::Error | AsyncStatus::Canceled => {
+                return Err(format!("{label} was cancelled or failed."));
+            }
+            AsyncStatus::Started => {
+                if start.elapsed() > Duration::from_secs(60) {
+                    return Err(format!("{label} timed out after 60 seconds."));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            _ => {
+                if start.elapsed() > Duration::from_secs(60) {
+                    return Err(format!("{label} timed out after 60 seconds."));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn windows_system_synthesize(text: &str, voice_id: &str, rate: f32, pitch: f32) -> Result<Vec<u8>, String> {
+    let _apartment = init_sta()
+        .map_err(|error| format!("Could not initialize the Windows speech apartment: {error}"))?;
+    let voices = SpeechSynthesizer::AllVoices()
+        .map_err(|error| format!("Windows could not enumerate installed speech voices: {error}"))?;
+    let count = voices.Size()
+        .map_err(|error| format!("Could not read the Windows speech voice list: {error}"))?;
+
+    let mut selected = None;
+    let mut first_japanese = None;
+    let mut default_japanese = None;
+    let default_id = SpeechSynthesizer::DefaultVoice()
+        .ok()
+        .and_then(|voice| voice.Id().ok())
+        .map(|id| id.to_string());
+
+    for index in 0..count {
+        let voice = voices.GetAt(index)
+            .map_err(|error| format!("Could not read Windows speech voice {index}: {error}"))?;
+        let id = voice.Id()
+            .map_err(|error| format!("Could not read a Windows speech voice ID: {error}"))?
+            .to_string();
+        let language = voice.Language()
+            .map_err(|error| format!("Could not read the language of Windows speech voice {id}: {error}"))?
+            .to_string();
+        if !language.trim().to_ascii_lowercase().starts_with("ja") {
+            continue;
+        }
+        if !voice_id.trim().is_empty() && id == voice_id {
+            selected = Some(voice.clone());
+            break;
+        }
+        if first_japanese.is_none() {
+            first_japanese = Some(voice.clone());
+        }
+        if default_id.as_deref() == Some(id.as_str()) {
+            default_japanese = Some(voice.clone());
+        }
+    }
+
+    let voice = selected.or(default_japanese).or(first_japanese)
+        .ok_or_else(|| "Windows native speech synthesis has no Japanese voice installed. Install the Japanese Speech language feature in Windows Language options, then refresh the TTS voice list.".to_string())?;
+    let synthesizer = SpeechSynthesizer::new()
+        .map_err(|error| format!("Could not create the Windows speech synthesizer: {error}"))?;
+    synthesizer.SetVoice(&voice)
+        .map_err(|error| format!("Could not select the Windows speech voice: {error}"))?;
+
+    let rate_percent = ((if rate.is_finite() { rate } else { 1.0 }.clamp(0.5, 3.0) - 1.0) * 100.0).round() as i32;
+    let pitch_percent = ((if pitch.is_finite() { pitch } else { 1.0 }.clamp(0.5, 2.0) - 1.0) * 100.0).round() as i32;
+    let ssml = format!(
+        "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"ja-JP\"><prosody rate=\"{rate_percent:+}%\" pitch=\"{pitch_percent:+}%\">{}</prosody></speak>",
+        edge_xml(text)
+    );
+    let operation = synthesizer.SynthesizeSsmlToStreamAsync(&HSTRING::from(ssml))
+        .map_err(|error| format!("Windows could not synthesize the text: {error}"))?;
+    let stream = wait_for_speech_operation(
+        || operation.Status(),
+        || operation.GetResults(),
+        "Windows speech synthesis",
+    )?;
+
+    let size = stream.Size()
+        .map_err(|error| format!("Could not read generated Windows speech audio: {error}"))?;
+    if size == 0 || size > EDGE_MAX_AUDIO_BYTES as u64 {
+        return Err("Windows speech audio was empty or exceeded the 16 MB limit.".to_string());
+    }
+    let input = stream.GetInputStreamAt(0)
+        .map_err(|error| format!("Could not open generated Windows speech audio: {error}"))?;
+    let reader = DataReader::CreateDataReader(&input)
+        .map_err(|error| format!("Could not read generated Windows speech audio: {error}"))?;
+    let load = reader.LoadAsync(size as u32)
+        .map_err(|error| format!("Could not load generated Windows speech audio: {error}"))?;
+    wait_for_speech_operation(
+        || load.Status(),
+        || load.GetResults(),
+        "Reading Windows speech audio",
+    )?;
+    let mut bytes = vec![0; size as usize];
+    reader.ReadBytes(&mut bytes)
+        .map_err(|error| format!("Could not copy generated Windows speech audio: {error}"))?;
+    Ok(bytes)
+}
+
+#[cfg(not(windows))]
+async fn tts_system_synthesize(_text: String, _voice_id: String, _rate: f32, _pitch: f32) -> Result<String, String> {
+    Err("Native Windows speech synthesis is only available on Windows.".to_string())
+}
+
+#[cfg(windows)]
+async fn tts_system_synthesize(text: String, voice_id: String, rate: f32, pitch: f32) -> Result<String, String> {
+    let bytes = tokio::task::spawn_blocking(move || windows_system_synthesize(&text, &voice_id, rate, pitch))
+        .await
+        .map_err(|error| format!("Windows speech synthesis worker failed: {error}"))??;
+    Ok(STANDARD.encode(bytes))
+}
+
 #[tauri::command]
 pub async fn tts_edge_voices() -> Result<Vec<TtsVoiceInfo>, String> {
     tts_edge_voice_list().await
@@ -960,6 +1160,7 @@ pub async fn tts_synthesize(
     let client = request_client()?;
 
     match engine.as_str() {
+        "system" => tts_system_synthesize(text, voice, rate, pitch).await,
         "edge" => {
             let bytes = tts_edge_synthesize(&text, &voice, rate, pitch, &options).await?;
             Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
