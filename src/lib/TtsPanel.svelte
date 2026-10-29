@@ -71,11 +71,12 @@
   function applyReplacements(text: string) {
     let value = text;
     for (const rule of ttsConfig.replacements) {
-      if (!rule.pattern) continue;
+      if (!rule.pattern || (rule.bookId && rule.bookId !== id)) continue;
       try {
-        value = value.replace(new RegExp(rule.pattern, "gu"), rule.replacement);
+        if (rule.regex ?? true) value = value.replace(new RegExp(rule.pattern, "gu"), rule.replacement);
+        else value = value.split(rule.pattern).join(rule.replacement);
       } catch {
-        // An invalid pattern is ignored, leaving the rest of the rules active.
+        // An invalid regular expression is ignored, leaving the rest of the rules active.
       }
     }
     return value;
