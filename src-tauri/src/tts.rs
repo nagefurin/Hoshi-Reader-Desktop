@@ -313,12 +313,12 @@ async fn tts_edge_voice_list() -> Result<Vec<String>, String> {
     if !response.status().is_success() {
         return Err(format!("Microsoft Edge TTS voice list returned HTTP {}.", response.status()));
     }
+    let content_type = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("unknown content type").to_string();
+    let status = response.status();
     let bytes = response.bytes().await.map_err(|_| "Could not read Edge TTS voices.".to_string())?;
     if bytes.len() > 5 * 1024 * 1024 {
         return Err("Edge TTS voice list response was unexpectedly large.".to_string());
     }
-    let content_type = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("unknown content type").to_string();
-    let status = response.status();
     let values: Vec<EdgeVoice> = serde_json::from_slice(&bytes).map_err(|error| {
         let preview = String::from_utf8_lossy(&bytes).chars().take(240).collect::<String>();
         format!("Microsoft Edge TTS returned an invalid voice list (HTTP {status}, {content_type}): {error}. Response: {preview}")
