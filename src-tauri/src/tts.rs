@@ -32,8 +32,6 @@ use windows::{
     core::HSTRING,
     Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_SINGLETHREADED},
 };
-#[cfg(windows)]
-use windows_future::AsyncStatus;
 
 use crate::{book, library};
 
@@ -1031,7 +1029,7 @@ pub async fn tts_system_voices() -> Result<Vec<SystemTtsVoiceInfo>, String> {
 
 #[cfg(windows)]
 fn wait_for_speech_operation<T>(
-    status: impl Fn() -> windows::core::Result<AsyncStatus>,
+    status: impl Fn() -> windows::core::Result<i32>,
     result: impl FnOnce() -> windows::core::Result<T>,
     label: &str,
 ) -> Result<T, String> {
@@ -1040,13 +1038,13 @@ fn wait_for_speech_operation<T>(
         let current = status()
             .map_err(|error| format!("{label} failed: {error}"))?;
         match current {
-            AsyncStatus::Completed => {
+            1 => {
                 return result().map_err(|error| format!("{label} failed: {error}"));
             }
-            AsyncStatus::Error | AsyncStatus::Canceled => {
+            2 | 3 => {
                 return Err(format!("{label} was cancelled or failed."));
             }
-            AsyncStatus::Started => {
+            0 => {
                 if start.elapsed() > Duration::from_secs(60) {
                     return Err(format!("{label} timed out after 60 seconds."));
                 }
@@ -1120,7 +1118,7 @@ fn windows_system_synthesize(text: &str, voice_id: &str, rate: f32, pitch: f32) 
     let operation = synthesizer.SynthesizeSsmlToStreamAsync(&HSTRING::from(ssml))
         .map_err(|error| format!("Windows could not synthesize the text: {error}"))?;
     let stream = wait_for_speech_operation(
-        || operation.Status(),
+        || operation.Status().map(|status| status.0),
         || operation.GetResults(),
         "Windows speech synthesis",
     )?;
@@ -1137,7 +1135,7 @@ fn windows_system_synthesize(text: &str, voice_id: &str, rate: f32, pitch: f32) 
     let load = reader.LoadAsync(size as u32)
         .map_err(|error| format!("Could not load generated Windows speech audio: {error}"))?;
     wait_for_speech_operation(
-        || load.Status(),
+        || load.Status().map(|status| status.0),
         || load.GetResults(),
         "Reading Windows speech audio",
     )?;
