@@ -1177,26 +1177,27 @@
   let pendingTtsPresentation: { chapterIndex: number; text: string; imagesBefore: number[] } | null = null;
   let resolveTtsPositioned: (() => void) | null = null;
 
+  async function holdTtsImages(chapterIndex: number, text: string, images: number[]) {
+    if (!sasayakiConfig.sasayakiAutoScroll || !sasayakiConfig.sasayakiImagePause) return;
+    const holdMs = Math.max(0, Number(sasayakiConfig.sasayakiImagePauseDuration) || 0) * 1000;
+    for (const imageIndex of images) {
+      if (chapterIndex !== index || ttsCurrentHighlight?.chapterIndex !== chapterIndex ||
+          ttsCurrentHighlight.text !== text) return;
+      postToFrame({ hoshi: "tts-image", index: imageIndex });
+      if (holdMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, holdMs));
+    }
+  }
+
   async function presentTtsSegment(presentation: { chapterIndex: number; text: string; imagesBefore: number[] }) {
     if (presentation.chapterIndex !== index || ttsCurrentHighlight?.chapterIndex !== presentation.chapterIndex ||
         ttsCurrentHighlight.text !== presentation.text) return;
-    if (!sasayakiConfig.sasayakiAutoScroll) {
-      postToFrame({ hoshi: "tts-highlight", text: presentation.text, reveal: false });
-      return;
-    }
-
-    if (sasayakiConfig.sasayakiImagePause) {
-      const holdMs = Math.max(0, Number(sasayakiConfig.sasayakiImagePauseDuration) || 0) * 1000;
-      for (const imageIndex of presentation.imagesBefore) {
-        if (presentation.chapterIndex !== index || ttsCurrentHighlight?.text !== presentation.text) return;
-        postToFrame({ hoshi: "tts-image", index: imageIndex });
-        if (holdMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, holdMs));
-      }
-    }
-
-    if (presentation.chapterIndex === index && ttsCurrentHighlight?.text === presentation.text) {
-      postToFrame({ hoshi: "tts-highlight", text: presentation.text, reveal: true });
-    }
+    await holdTtsImages(presentation.chapterIndex, presentation.text, presentation.imagesBefore);
+    if (presentation.chapterIndex !== index || ttsCurrentHighlight?.text !== presentation.text) return;
+    postToFrame({
+      hoshi: "tts-highlight",
+      text: presentation.text,
+      reveal: sasayakiConfig.sasayakiAutoScroll,
+    });
   }
 
   async function onTtsReadSegment(spineIndex: number, text: string, imagesBefore: number[]): Promise<void> {
@@ -2403,6 +2404,7 @@
             lookupActive={popups.length > 0}
             continuousMode={continuous}
             onReadSegment={onTtsReadSegment}
+            onHoldImages={holdTtsImages}
             onClearHighlight={clearTtsHighlight}
           />
         </div>
