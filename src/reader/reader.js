@@ -10,6 +10,8 @@ window.hoshiReader = {
     ttuRegexNegated: /[^0-9A-Za-z○◯々-〇〻ぁ-ゖゝ-ゞァ-ヺー０-９Ａ-Ｚａ-ｚｦ-ﾝ가-힣ㄱ-ㆎ\p{Radical}\p{Unified_Ideograph}]+/gimu,
     ttuRegex: /[0-9A-Za-z○◯々-〇〻ぁ-ゖゝ-ゞァ-ヺー０-９Ａ-Ｚａ-ｚｦ-ﾝ가-힣ㄱ-ㆎ\p{Radical}\p{Unified_Ideograph}]/iu,
     activeCueId: null,
+    ttsWrappers: [],
+    ttsSearchOffset: 0,
     spacer: null,
     pagesPerScreen: 1,
     cueWrappers: new Map(),
@@ -443,6 +445,87 @@ window.hoshiReader = {
         return { progress: scrolled ? this.calculateProgress() : null };
     },
     
+    highlightTtsText(text, reveal) {
+        this.clearTtsHighlight(false);
+        const needle = this.normalizeText(text || '');
+        if (!needle) {
+            return null;
+        }
+
+        const characters = [];
+        const locations = [];
+        let node;
+        const walker = this.createWalker();
+        while (node = walker.nextNode()) {
+            const raw = node.textContent || '';
+            let i = 0;
+            while (i < raw.length) {
+                const char = String.fromCodePoint(raw.codePointAt(i));
+                const next = i + char.length;
+                if (this.isMatchableChar(char)) {
+                    characters.push(char);
+                    locations.push({ node, start: i, end: next });
+                }
+                i = next;
+            }
+        }
+
+        const source = characters.join('');
+        let found = source.indexOf(needle, Math.min(this.ttsSearchOffset, source.length));
+        if (found < 0) found = source.indexOf(needle);
+        if (found < 0) {
+            this.ttsSearchOffset = 0;
+            return null;
+        }
+
+        const segments = [];
+        for (let i = found; i < found + needle.length; i++) {
+            const location = locations[i];
+            if (!location) return null;
+            const previous = segments[segments.length - 1];
+            if (previous && previous.node === location.node) {
+                previous.end = location.end;
+            } else {
+                segments.push({ node: location.node, start: location.start, end: location.end });
+            }
+        }
+
+        const range = document.createRange();
+        const wrappers = [];
+        for (let i = segments.length - 1; i >= 0; i--) {
+            const segment = segments[i];
+            range.setStart(segment.node, segment.start);
+            range.setEnd(segment.node, segment.end);
+            const wrapper = document.createElement('span');
+            wrapper.className = 'hoshi-tts-cue hoshi-tts-active';
+            wrapper.appendChild(range.extractContents());
+            range.insertNode(wrapper);
+            wrappers.push(wrapper);
+        }
+
+        this.ttsWrappers = wrappers.reverse();
+        this.ttsSearchOffset = found + needle.length;
+        this.buildNodeOffsets();
+
+        if (reveal && this.ttsWrappers.length) {
+            const target = document.createRange();
+            target.selectNodeContents(this.ttsWrappers[0]);
+            if (this.scrollToRange(target)) {
+                return this.calculateProgress();
+            }
+        }
+        return null;
+    },
+
+    clearTtsHighlight(resetSearch = true) {
+        if (this.ttsWrappers.length) {
+            this.unwrap(this.ttsWrappers);
+            this.ttsWrappers = [];
+            this.buildNodeOffsets();
+        }
+        if (resetSearch) this.ttsSearchOffset = 0;
+    },
+
     resetSasayakiCues() {
         this.cueWrappers.forEach(wrappers => this.unwrap(wrappers));
         this.cueWrappers.clear();
