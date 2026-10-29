@@ -1,13 +1,13 @@
 <script module lang="ts">
   export const settingsTabs = [
     ["appearance", "Appearance"],
-    ["tts", "Text-to-Speech"],
     ["dictionaries", "Dictionaries"],
     ["anki", "Anki"],
     ["audio", "Audio"],
     ["syncing", "Syncing"],
     ["input", "Input"],
     ["sasayaki", "Sasayaki"],
+    ["tts", "TTS"],
     ["backup", "Backup"],
     ["about", "About"],
   ] as const;
