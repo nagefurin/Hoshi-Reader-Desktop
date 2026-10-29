@@ -4,6 +4,8 @@
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
 
+  let { compact = false }: { compact?: boolean } = $props();
+
   let voices = $state<SpeechSynthesisVoice[]>([]);
   let edgeVoices = $state<string[]>([]);
   let edgeVoiceLoading = $state(false);
@@ -71,8 +73,8 @@
   }
 </script>
 
-<SettingsSection title="Speech Engine">
-  <SettingRow label="Provider">
+<SettingsSection compact={compact} title="Speech Engine">
+  <SettingRow compact={compact} label="Provider">
     <select class="select select-sm w-52" value={ttsConfig.engine} onchange={(event) => changeEngine(event.currentTarget.value)}>
       <option value="device">Device / system voice</option>
       <option value="edge">Microsoft Edge (online)</option>
@@ -83,7 +85,7 @@
   </SettingRow>
 
   {#if ttsConfig.engine === "device"}
-    <SettingRow label="Narration Voice">
+    <SettingRow compact={compact} label="Narration Voice">
       <select class="select select-sm w-52" bind:value={ttsConfig.voice} onchange={save}>
         <option value="">System default</option>
         {#each voices as voice (voice.voiceURI)}
@@ -91,7 +93,7 @@
         {/each}
       </select>
     </SettingRow>
-    <SettingRow label="Dialogue Voice">
+    <SettingRow compact={compact} label="Dialogue Voice">
       <select class="select select-sm w-52" bind:value={ttsConfig.dialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
         {#each voices as voice (voice.voiceURI)}
@@ -103,7 +105,7 @@
       <p class="text-xs text-base-content/60">No system voices have been listed yet. Install a voice for your language in the operating system's speech settings.</p>
     {/if}
   {:else if ttsConfig.engine === "edge"}
-    <SettingRow label="Japanese Voice">
+    <SettingRow compact={compact} label="Japanese Voice">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.edgeVoice} onchange={save}>
           {#if edgeVoices.length === 0}
@@ -123,7 +125,7 @@
     {/if}
     <p class="text-xs text-base-content/60">Edge TTS is an online Microsoft service and does not require an API key. Voice availability may change on the service side.</p>
   {:else if ttsConfig.engine === "openAi" || ttsConfig.engine === "vits"}
-    <SettingRow label="Base URL">
+    <SettingRow compact={compact} label="Base URL">
       <input
         class="input input-sm w-full max-w-lg"
         type="url"
@@ -132,18 +134,18 @@
         onchange={save}
       />
     </SettingRow>
-    <SettingRow label="API Key">
+    <SettingRow compact={compact} label="API Key">
       <input class="input input-sm w-full max-w-lg" type="password" autocomplete="off" bind:value={ttsRuntime.apiKey} placeholder="Optional; held in memory only" />
     </SettingRow>
     {#if ttsConfig.engine === "openAi"}
-      <SettingRow label="Model">
+      <SettingRow compact={compact} label="Model">
         <input class="input input-sm w-52" bind:value={ttsConfig.model} onchange={save} placeholder="tts-1" />
       </SettingRow>
-      <SettingRow label="Voice">
+      <SettingRow compact={compact} label="Voice">
         <input class="input input-sm w-52" bind:value={ttsConfig.remoteVoice} onchange={save} placeholder="alloy" />
       </SettingRow>
     {:else}
-      <SettingRow label="VITS Model">
+      <SettingRow compact={compact} label="VITS Model">
         <select class="select select-sm w-52" bind:value={ttsConfig.vitsModel} onchange={save}>
           <option value="vits">VITS</option>
           <option value="w2v2-vits">W2V2-VITS</option>
@@ -151,7 +153,7 @@
           <option value="gpt-sovits">GPT-SoVITS</option>
         </select>
       </SettingRow>
-      <SettingRow label="Speaker ID">
+      <SettingRow compact={compact} label="Speaker ID">
         <input class="input input-sm w-28" type="number" min="0" step="1" bind:value={ttsConfig.speakerId} onchange={save} />
       </SettingRow>
     {/if}
@@ -159,15 +161,15 @@
   {/if}
 </SettingsSection>
 
-<SettingsSection title="Playback">
-  <SettingRow label="Speech Rate">
+<SettingsSection compact={compact} title="Playback">
+  <SettingRow compact={compact} label="Speech Rate">
     <div class="flex w-56 items-center gap-3">
       <input class="range range-xs flex-1" type="range" min="0.5" max="3" step="0.1" bind:value={ttsConfig.rate} oninput={save} />
       <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.rate).toFixed(1)}x</span>
     </div>
   </SettingRow>
   {#if ttsConfig.engine === "device" || ttsConfig.engine === "edge"}
-    <SettingRow label={ttsConfig.engine === "edge" ? "Pitch (Hz)" : "Pitch"}>
+    <SettingRow compact={compact} label={ttsConfig.engine === "edge" ? "Pitch (Hz)" : "Pitch"}>
       <div class="flex w-56 items-center gap-3">
         <input
           class="range range-xs flex-1"
@@ -184,22 +186,22 @@
       </div>
     </SettingRow>
   {/if}
-  <SettingRow label="Volume">
+  <SettingRow compact={compact} label="Volume">
     <div class="flex w-56 items-center gap-3">
       <input class="range range-xs flex-1" type="range" min="0" max="1" step="0.05" bind:value={ttsConfig.volume} oninput={save} />
       <span class="w-10 text-right text-xs tabular-nums">{Math.round(Number(ttsConfig.volume) * 100)}%</span>
     </div>
   </SettingRow>
-  <SettingRow label="Dialogue Voice">
+  <SettingRow compact={compact} label="Dialogue Voice">
     <input class="toggle toggle-sm toggle-primary" type="checkbox" bind:checked={ttsConfig.splitDialogue} onchange={save} disabled={ttsConfig.engine !== "device"} />
   </SettingRow>
-  <SettingRow label="Use Furigana Readings">
+  <SettingRow compact={compact} label="Use Furigana Readings">
     <input class="toggle toggle-sm toggle-primary" type="checkbox" bind:checked={ttsConfig.useRubyReadings} onchange={save} />
   </SettingRow>
   <p class="text-xs text-base-content/60">Dialogue splitting uses Japanese quote marks and routes quoted text to the optional dialogue voice. Furigana readings replace ruby text where EPUB markup provides an rt reading.</p>
 </SettingsSection>
 
-<SettingsSection title="Pronunciation Replacements">
+<SettingsSection compact={compact} title="Pronunciation Replacements">
   <p class="mb-1 text-xs text-base-content/60">Rules are applied in order to the book text before it is spoken. Patterns are JavaScript regular expressions. Online providers receive the text being synthesized.</p>
   {#each ttsConfig.replacements as rule (rule.id)}
     <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
