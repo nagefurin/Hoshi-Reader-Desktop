@@ -17,6 +17,20 @@ export function persisted<T extends object>(key: string, defaults: T) {
         }
       }
     } catch {}
+  } else {
+    // One-time migration of this fork's older, unprefixed TTS settings.
+    // After migration, TTS settings belong solely to the fork-specific key.
+    try {
+      if (localStorage.getItem(workKey) === null) {
+        const legacy = localStorage.getItem(key);
+        if (legacy !== null) {
+          const parsed: unknown = JSON.parse(legacy);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            localStorage.setItem(workKey, JSON.stringify(parsed));
+          }
+        }
+      }
+    } catch {}
   }
 
   let initial: T = { ...defaults };

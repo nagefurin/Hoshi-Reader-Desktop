@@ -373,6 +373,21 @@ pub(crate) fn import_original_settings(app: &AppHandle) -> std::io::Result<()> {
                     fs::write(fork_dir.join("anki_config.json"), contents)?;
                 }
             }
+
+            // Dictionary selections/order are settings; the actual dictionary assets
+            // remain in the original shared directory so both apps can read them.
+            let original_dict_settings = original_dir.join("Dictionaries");
+            let fork_dict_settings = fork_dir.join("DictionarySettings");
+            for name in ["config.json", "collapsed.json"] {
+                let source = original_dict_settings.join(name);
+                if source.is_file() {
+                    let contents = fs::read(&source)?;
+                    if serde_json::from_slice::<serde_json::Value>(&contents).is_ok() {
+                        fs::create_dir_all(&fork_dict_settings)?;
+                        fs::write(fork_dict_settings.join(name), contents)?;
+                    }
+                }
+            }
         }
     }
     #[cfg(not(windows))]
