@@ -2,6 +2,12 @@ name: Windows build
 run-name: Portable fork build (${{ github.ref_name }})
 
 on:
+  push:
+    branches:
+      - feature/tts-port-android
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -17,7 +23,7 @@ concurrency:
 
 jobs:
   build-windows:
-    if: github.ref == 'refs/heads/feature/tts-port-android'
+    if: github.ref == 'refs/heads/feature/tts-port-android' || github.head_ref == 'feature/tts-port-android'
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -37,6 +43,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Run Rust regression tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Check frontend
         run: pnpm check
