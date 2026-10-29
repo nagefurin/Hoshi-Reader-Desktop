@@ -322,9 +322,9 @@ struct EdgeVoice {
     #[serde(rename = "ShortName")]
     short_name: String,
     #[serde(rename = "StyleList", default)]
-    styles: Vec<String>,
+    styles: Option<Vec<String>>,
     #[serde(rename = "RolePlayList", default)]
-    roles: Vec<String>,
+    roles: Option<Vec<String>>,
 }
 
 #[derive(Clone)]
@@ -347,8 +347,8 @@ fn japanese_microsoft_voices(bytes: &[u8], provider: &str) -> Result<Vec<TtsVoic
         .filter(|voice| !voice.short_name.trim().is_empty())
         .map(|voice| TtsVoiceInfo {
             id: voice.short_name,
-            styles: voice.styles,
-            roles: voice.roles,
+            styles: voice.styles.unwrap_or_default(),
+            roles: voice.roles.unwrap_or_default(),
         })
         .collect();
     voices.sort_by(|a, b| a.id.cmp(&b.id));
