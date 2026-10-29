@@ -1,7 +1,23 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { AudioLines, Pause, Play, Repeat, SkipBack, SkipForward, Square } from "@lucide/svelte";
+  import { AudioLines, Pause, Play, Repeat, SkipBack, SkipForward, Square } from "@
+
+  const READER_CHARACTER = /[0-9A-Za-z○◯々-〇〻ぁ-ゖゝ-ゞァ-ヺー０-９Ａ-Ｚａ-ｚｦ-ﾝ가-힣ㄱ-ㆎ⺀-⿕⼀-⿕\p{Unified_Ideograph}]/u;
+
+  function countReaderCharacters(value: string): number {
+    let count = 0;
+    for (const character of Array.from(value)) {
+      if (READER_CHARACTER.test(character)) count++;
+    }
+    return count;
+  }
+
+  function readerCharacterOffset(): number {
+    return Math.max(0, Math.round(currentCharacterCount - currentChapterCharacterStart));
+  }
+
+lucide/svelte";
   import { ttsConfig, ttsRuntime } from "./ttsConfig.svelte";
   import TtsSettings from "./TtsSettings.svelte";
   import { sasayakiConfig } from "./sasayakiConfig.svelte";
@@ -28,6 +44,7 @@
     imagesBefore: number[];
     imagesAfter: number[];
     dialogue: boolean;
+    readerCharacterStart: number;
   };
 
   type TtsControlApi = {
@@ -41,6 +58,8 @@
     id,
     title,
     currentChapterIndex,
+    currentCharacterCount,
+    currentChapterCharacterStart,
     lookupActive = false,
     continuousMode = false,
     sessionActive = $bindable(false),
@@ -53,6 +72,8 @@
     id: string;
     title: string;
     currentChapterIndex: number;
+    currentCharacterCount: number;
+    currentChapterCharacterStart: number;
     lookupActive?: boolean;
     continuousMode?: boolean;
     sessionActive?: boolean;
@@ -320,6 +341,7 @@
                 imagesBefore,
                 imagesAfter: [],
                 dialogue: part.dialogue,
+                readerCharacterStart: countReaderCharacters(sourceText.slice(0, sourceStart)),
               });
             }
           }
@@ -452,7 +474,7 @@
     return runId;
   }
 
-  async function playFrom(startIndex: number) {
+  async function playFrom(startIndex: number, startCharacterCount = 0) {
     const token = cancelCurrent();
     sessionStartIndex = startIndex;
     active = false;
@@ -469,7 +491,13 @@
       segments = buildSegments(loaded, startIndex);
       audioCache.clear();
       if (segments.length === 0) throw new Error("No readable text remains after pronunciation replacements.");
-      position = 0;
+      const targetCharacter = Math.max(0, Math.round(startCharacterCount));
+      const startPosition = segments.findIndex((segment) =>
+        segment.chapterIndex > startIndex ||
+        (segment.chapterIndex === startIndex &&
+          segment.readerCharacterStart + countReaderCharacters(segment.sourceText) > targetCharacter),
+      );
+      position = startPosition >= 0 ? startPosition : Math.max(0, segments.length - 1);
       sessionActive = true;
       active = true;
       await speakAt(position, token);
@@ -640,7 +668,7 @@
   async function togglePlayback() {
     autoPausedForLookup = false;
     if (!active) {
-      await playFrom(currentChapterIndex);
+      await playFrom(currentChapterIndex, readerCharacterOffset());
       return;
     }
     if (!paused) pausePlayback();
@@ -708,8 +736,8 @@
     </button>
   </div>
 
-  <button class="btn btn-outline btn-sm" onclick={() => playFrom(currentChapterIndex)} disabled={loading}>
-    Start at current chapter
+  <button class="btn btn-outline btn-sm" onclick={() => playFrom(currentChapterIndex, readerCharacterOffset())} disabled={loading}>
+    Start at reader position
   </button>
   <button class="btn btn-ghost btn-sm" onclick={() => playFrom(0)} disabled={loading}>
     Start from book beginning

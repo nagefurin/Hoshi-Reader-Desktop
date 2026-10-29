@@ -89,3 +89,14 @@ export function sortBooks(
   });
   return reversed ? sorted.reverse() : sorted;
 }
+
+function refreshBookSortFromForkFile() {
+  const option = loadForkPreference(KEY);
+  bookSort.option = option === "Title" || option === "Progress" || option === "Time Read" ? option : "Recent";
+  bookSort.reversed = loadForkPreference(REVERSED_KEY) === "true";
+  bookSort.customShelves = storedCustomShelves();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("nagefurin-settings-loaded", refreshBookSortFromForkFile);
+}

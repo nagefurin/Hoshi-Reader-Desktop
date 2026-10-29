@@ -2452,6 +2452,8 @@
             {id}
             {title}
             currentChapterIndex={index}
+            currentCharacterCount={currentChar}
+            currentChapterCharacterStart={bookInfo.chapterInfo[spine[index]]?.currentTotal ?? 0}
             lookupActive={popups.length > 0}
             continuousMode={continuous}
             bind:sessionActive={ttsSessionActive}

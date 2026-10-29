@@ -451,8 +451,123 @@ pub(crate) fn import_original_settings(app: &AppHandle) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Shared user data root used by upstream Hoshi Reader on Windows.
+/// Book files/bookmarks are shared; fork preferences and non-book assets remain separate.
+pub(crate) fn shared_data_dir(app: &AppHandle) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .or_else(|| app.path().app_data_dir().ok())
+            .unwrap_or_else(|| std::env::temp_dir());
+        root.join("hoshi-reader")
+    }
+    #[cfg(not(windows))]
+    {
+        app.path().app_data_dir().unwrap()
+    }
+}
+
+fn find_book_by_id(root: &Path, id: &str) -> Option<PathBuf> {
+    fs::read_dir(root).ok()?.filter_map(Result::ok).map(|entry| entry.path())
+        .find(|path| {
+            path.is_dir() && read_json::<BookMetadata>(&path.join(METADATA_FILE))
+                .is_some_and(|metadata| metadata.id == id)
+        })
+}
+
+fn merge_legacy_book_files(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            merge_legacy_book_files(&source_path, &destination_path)?;
+            continue;
+        }
+        if !kind.is_file() {
+            continue;
+        }
+        if !destination_path.exists() {
+            fs::copy(&source_path, &destination_path)?;
+        } else if entry.file_name().to_string_lossy() == BOOKMARK_FILE {
+            let source_bookmark = read_json::<Bookmark>(&source_path);
+            let destination_bookmark = read_json::<Bookmark>(&destination_path);
+            let source_modified = source_bookmark.as_ref().and_then(|bookmark| bookmark.last_modified)
+                .unwrap_or(DISTANT_PAST);
+            let destination_modified = destination_bookmark.as_ref().and_then(|bookmark| bookmark.last_modified)
+                .unwrap_or(DISTANT_PAST);
+            if source_modified > destination_modified {
+                fs::copy(&source_path, &destination_path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Import data created by older portable fork builds into the shared book library.
+/// Existing upstream book IDs are retained and their bookmarks are merged conservatively.
+pub(crate) fn import_portable_books(app: &AppHandle) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        let shared_books = shared_data_dir(app).join(BOOKS_DIR);
+        fs::create_dir_all(&shared_books)?;
+        let mut legacy_roots = Vec::new();
+        if let Ok(executable) = std::env::current_exe()
+            && let Some(parent) = executable.parent()
+        {
+            legacy_roots.push(parent.join("Hoshi-Reader-Fork-data").join(BOOKS_DIR));
+        }
+        if let Ok(original_app_dir) = app.path().app_data_dir() {
+            legacy_roots.push(original_app_dir.join("NagefurinFork").join(BOOKS_DIR));
+        }
+
+        for legacy_root in legacy_roots {
+            if !legacy_root.is_dir() || legacy_root == shared_books {
+                continue;
+            }
+            for entry in fs::read_dir(&legacy_root)? {
+                let entry = entry?;
+                let source = entry.path();
+                if !source.is_dir() {
+                    continue;
+                }
+                let Some(metadata) = read_json::<BookMetadata>(&source.join(METADATA_FILE)) else {
+                    continue;
+                };
+                if let Some(existing) = find_book_by_id(&shared_books, &metadata.id) {
+                    merge_legacy_book_files(&source, &existing)?;
+                    continue;
+                }
+
+                let original_name = entry.file_name().to_string_lossy().into_owned();
+                let mut target_name = original_name.clone();
+                let mut suffix = 2usize;
+                while shared_books.join(&target_name).exists() {
+                    target_name = format!("{original_name}-nagefurin-{suffix}");
+                    suffix += 1;
+                }
+                let destination = shared_books.join(&target_name);
+                copy_directory_contents(&source, &destination)?;
+                if let Some(mut imported) = read_json::<BookMetadata>(&destination.join(METADATA_FILE)) {
+                    imported.folder = target_name;
+                    write_json(&destination.join(METADATA_FILE), &imported)
+                        .map_err(std::io::Error::other)?;
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
+    Ok(())
+}
+
 pub(crate) fn books_dir(app: &AppHandle) -> PathBuf {
-    let dir = app_dir(app).join(BOOKS_DIR);
+    let dir = shared_data_dir(app).join(BOOKS_DIR);
     fs::create_dir_all(&dir).unwrap();
     dir
 }

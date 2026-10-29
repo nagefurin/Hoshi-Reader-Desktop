@@ -12,6 +12,7 @@ mod fonts;
 mod highlights;
 mod ime;
 mod library;
+mod settings;
 mod local_audio;
 #[cfg(windows)]
 mod media_controls;
@@ -109,6 +110,8 @@ pub fn run() {
             library::epub_author,
             library::set_book_author,
             library::load_book_info,
+            settings::load_fork_settings,
+            settings::save_fork_settings,
             search::search_book,
             highlights::load_highlights,
             highlights::save_highlights,
@@ -204,6 +207,7 @@ pub fn run() {
         ])
         .setup(|app| {
             library::import_original_settings(app.handle())?;
+            library::import_portable_books(app.handle())?;
             #[cfg(windows)]
             media_controls::set_app_id("de.manhhao.hoshi.nagefurin-fork").ok();
             let builder = tauri::WebviewWindowBuilder::from_config(

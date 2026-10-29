@@ -1,3 +1,5 @@
+import { subscribeForkSettings, setForkSetting } from "./forkSettingsFile";
+
 const FORK_PREFIX = "nagefurin.fork.";
 // TTS is a fork-only feature: never seed or overwrite it from the upstream app.
 const FORK_ONLY_SETTINGS = new Set(["tts.config"]);
@@ -39,10 +41,24 @@ export function persisted<T extends object>(key: string, defaults: T) {
     if (stored) initial = { ...defaults, ...JSON.parse(stored) };
   } catch {}
   const config = $state<T>(initial);
+
+  // The fork-specific JSON file is authoritative; browser storage is only used
+  // to migrate existing fork preferences or seed compatible upstream preferences.
+  subscribeForkSettings((document) => {
+    const stored = document[key];
+    if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+      Object.assign(config, defaults, stored);
+    } else {
+      setForkSetting(key, $state.snapshot(config));
+    }
+  });
+
   return {
     config,
     save() {
-      localStorage.setItem(workKey, JSON.stringify($state.snapshot(config)));
+      const snapshot = $state.snapshot(config);
+      try { localStorage.setItem(workKey, JSON.stringify(snapshot)); } catch {}
+      setForkSetting(key, snapshot);
     },
   };
 }

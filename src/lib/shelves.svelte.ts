@@ -122,3 +122,11 @@ export function authors(books: BookMetadata[]) {
   return [...groups.values()]
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
 }
+
+function refreshShelfOrdersFromForkFile() {
+  shelves.orders = storedOrders();
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("nagefurin-settings-loaded", refreshShelfOrdersFromForkFile);
+}
