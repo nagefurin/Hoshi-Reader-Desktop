@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsEngine } from "./ttsConfig.svelte";
+  import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsEngine, type TtsSynthesisOptions } from "./ttsConfig.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
   import SettingToggle from "./SettingToggle.svelte";
@@ -8,17 +8,49 @@
 
   let { compact = false, bookId = "" }: { compact?: boolean; bookId?: string } = $props();
 
+  type TtsVoiceInfo = { id: string; styles: string[]; roles: string[] };
+  const audioProfiles = [
+    { id: "", label: "None" },
+    { id: "wearable-class-device", label: "Wearable" },
+    { id: "handset-class-device", label: "Handset" },
+    { id: "headphone-class-device", label: "Headphones" },
+    { id: "small-bluetooth-speaker-class-device", label: "Small speaker" },
+    { id: "medium-bluetooth-speaker-class-device", label: "Medium speaker" },
+    { id: "large-home-entertainment-class-device", label: "Home audio" },
+    { id: "large-automotive-class-device", label: "Car audio" },
+    { id: "telephony-class-application", label: "Telephone" },
+  ];
+  const providerDefaults: TtsSynthesisOptions = {
+    volume: 0, style: "", styleDegree: 1, role: "",
+    leadingMs: -1, trailingMs: -1, commaMs: -1, semicolonMs: -1,
+    enumerationCommaMs: -1, sentenceBoundaryMs: -1,
+    format: "mp3", sampleRate: 24000, effectsProfile: "",
+  };
+
+  function currentOptions(): TtsSynthesisOptions {
+    const engine = ttsConfig.engine;
+    if (!ttsConfig.providerOptions[engine]) {
+      ttsConfig.providerOptions[engine] = { ...providerDefaults };
+    }
+    return ttsConfig.providerOptions[engine];
+  }
+
+  function updateOptions(update: Partial<TtsSynthesisOptions>) {
+    ttsConfig.providerOptions[ttsConfig.engine] = { ...currentOptions(), ...update };
+    saveTtsConfig();
+  }
+
   let voices = $state<SpeechSynthesisVoice[]>([]);
-  let edgeVoices = $state<string[]>([]);
+  let edgeVoices = $state<TtsVoiceInfo[]>([]);
   let edgeVoiceLoading = $state(false);
   let edgeVoiceError = $state("");
-  let azureVoices = $state<string[]>([]);
+  let azureVoices = $state<TtsVoiceInfo[]>([]);
   let azureVoiceLoading = $state(false);
   let azureVoiceError = $state("");
-  let translatorVoices = $state<string[]>([]);
+  let translatorVoices = $state<TtsVoiceInfo[]>([]);
   let translatorVoiceLoading = $state(false);
   let translatorVoiceError = $state("");
-  let googleCloudVoices = $state<string[]>([]);
+  let googleCloudVoices = $state<TtsVoiceInfo[]>([]);
   let googleCloudVoiceLoading = $state(false);
   let googleCloudVoiceError = $state("");
 
@@ -36,11 +68,10 @@
     edgeVoiceLoading = true;
     edgeVoiceError = "";
     try {
-      edgeVoices = await invoke<string[]>("tts_edge_voices");
-      if (edgeVoices.length && !edgeVoices.includes(ttsConfig.edgeVoice)) {
-        ttsConfig.edgeVoice = edgeVoices.includes("ja-JP-NanamiNeural")
-          ? "ja-JP-NanamiNeural"
-          : edgeVoices[0];
+      edgeVoices = await invoke<TtsVoiceInfo[]>("tts_edge_voices");
+      if (edgeVoices.length && !edgeVoices.some((voice) => voice.id === ttsConfig.edgeVoice)) {
+        ttsConfig.edgeVoice = edgeVoices.find((voice) => voice.id === "ja-JP-NanamiNeural")?.id
+          ?? edgeVoices[0].id;
         saveTtsConfig();
       }
       if (!edgeVoices.length) edgeVoiceError = "No Japanese Edge voices were returned.";
@@ -59,12 +90,13 @@
     azureVoiceLoading = true;
     azureVoiceError = "";
     try {
-      azureVoices = await invoke<string[]>("tts_azure_voices", {
+      azureVoices = await invoke<TtsVoiceInfo[]>("tts_azure_voices", {
         region: ttsConfig.azureRegion,
         apiKey: ttsRuntime.azureKey,
       });
-      if (azureVoices.length && !azureVoices.includes(ttsConfig.azureVoice)) {
-        ttsConfig.azureVoice = azureVoices.includes("ja-JP-NanamiNeural") ? "ja-JP-NanamiNeural" : azureVoices[0];
+      if (azureVoices.length && !azureVoices.some((voice) => voice.id === ttsConfig.azureVoice)) {
+        ttsConfig.azureVoice = azureVoices.find((voice) => voice.id === "ja-JP-NanamiNeural")?.id
+          ?? azureVoices[0].id;
         saveTtsConfig();
       }
       if (!azureVoices.length) azureVoiceError = "No Japanese Azure voices were returned.";
@@ -79,9 +111,9 @@
     translatorVoiceLoading = true;
     translatorVoiceError = "";
     try {
-      translatorVoices = await invoke<string[]>("tts_microsoft_translator_voices");
-      if (translatorVoices.length && !translatorVoices.includes(ttsConfig.microsoftTranslatorVoice)) {
-        ttsConfig.microsoftTranslatorVoice = translatorVoices[0];
+      translatorVoices = await invoke<TtsVoiceInfo[]>("tts_microsoft_translator_voices");
+      if (translatorVoices.length && !translatorVoices.some((voice) => voice.id === ttsConfig.microsoftTranslatorVoice)) {
+        ttsConfig.microsoftTranslatorVoice = translatorVoices[0].id;
         saveTtsConfig();
       }
       if (!translatorVoices.length) translatorVoiceError = "No Japanese Microsoft Translator voices were returned.";
@@ -100,11 +132,11 @@
     googleCloudVoiceLoading = true;
     googleCloudVoiceError = "";
     try {
-      googleCloudVoices = await invoke<string[]>("tts_google_cloud_voices", {
+      googleCloudVoices = await invoke<TtsVoiceInfo[]>("tts_google_cloud_voices", {
         apiKey: ttsRuntime.googleCloudKey,
       });
-      if (googleCloudVoices.length && !googleCloudVoices.includes(ttsConfig.googleCloudVoice)) {
-        ttsConfig.googleCloudVoice = googleCloudVoices[0];
+      if (googleCloudVoices.length && !googleCloudVoices.some((voice) => voice.id === ttsConfig.googleCloudVoice)) {
+        ttsConfig.googleCloudVoice = googleCloudVoices[0].id;
         saveTtsConfig();
       }
       if (!googleCloudVoices.length) googleCloudVoiceError = "No Japanese Google Cloud voices were returned.";
@@ -191,8 +223,8 @@
           {#if edgeVoices.length === 0}
             <option value={ttsConfig.edgeVoice}>{ttsConfig.edgeVoice || "Load voices"}</option>
           {/if}
-          {#each edgeVoices as voice (voice)}
-            <option value={voice}>{voice}</option>
+          {#each edgeVoices as voice (voice.id)}
+            <option value={voice.id}>{voice.id}</option>
           {/each}
         </select>
         <button class="btn btn-outline btn-sm" onclick={refreshEdgeVoices} disabled={edgeVoiceLoading}>
@@ -223,7 +255,7 @@
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.azureVoice} onchange={save}>
           {#if azureVoices.length === 0}<option value={ttsConfig.azureVoice}>{ttsConfig.azureVoice}</option>{/if}
-          {#each azureVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+          {#each azureVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
         </select>
         <button class="btn btn-outline btn-sm" onclick={refreshAzureVoices} disabled={azureVoiceLoading}>{azureVoiceLoading ? "Loading…" : "Refresh"}</button>
       </div>
@@ -231,7 +263,7 @@
     <SettingRow compact={compact} label="Dialogue Voice">
       <select class="select select-sm w-52" bind:value={ttsConfig.azureDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
-        {#each azureVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+        {#each azureVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
       </select>
     </SettingRow>
     {#if azureVoiceError}<p class="text-xs text-error">{azureVoiceError}</p>{/if}
@@ -240,7 +272,7 @@
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.microsoftTranslatorVoice} onchange={save}>
           {#if translatorVoices.length === 0}<option value={ttsConfig.microsoftTranslatorVoice}>{ttsConfig.microsoftTranslatorVoice}</option>{/if}
-          {#each translatorVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+          {#each translatorVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
         </select>
         <button class="btn btn-outline btn-sm" onclick={refreshTranslatorVoices} disabled={translatorVoiceLoading}>{translatorVoiceLoading ? "Loading…" : "Refresh"}</button>
       </div>
@@ -248,7 +280,7 @@
     <SettingRow compact={compact} label="Dialogue Voice">
       <select class="select select-sm w-52" bind:value={ttsConfig.microsoftTranslatorDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
-        {#each translatorVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+        {#each translatorVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
       </select>
     </SettingRow>
     {#if translatorVoiceError}<p class="text-xs text-error">{translatorVoiceError}</p>{/if}
@@ -261,7 +293,7 @@
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.googleCloudVoice} onchange={save}>
           {#if googleCloudVoices.length === 0}<option value={ttsConfig.googleCloudVoice}>{ttsConfig.googleCloudVoice}</option>{/if}
-          {#each googleCloudVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+          {#each googleCloudVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
         </select>
         <button class="btn btn-outline btn-sm" onclick={refreshGoogleCloudVoices} disabled={googleCloudVoiceLoading}>{googleCloudVoiceLoading ? "Loading…" : "Refresh"}</button>
       </div>
@@ -269,7 +301,7 @@
     <SettingRow compact={compact} label="Dialogue Voice">
       <select class="select select-sm w-52" bind:value={ttsConfig.googleCloudDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
-        {#each googleCloudVoices as voice (voice)}<option value={voice}>{voice}</option>{/each}
+        {#each googleCloudVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
       </select>
     </SettingRow>
     {#if googleCloudVoiceError}<p class="text-xs text-error">{googleCloudVoiceError}</p>{/if}
