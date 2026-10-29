@@ -203,9 +203,9 @@ pub async fn tts_load_text(app: AppHandle, id: String, use_ruby_readings: bool) 
 
 
 const EDGE_TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-const EDGE_VERSION: &str = "143.0.3650.75";
-const EDGE_BASE: &str = "https://speech.platform.bing.com/consumer/speech/synthesize/readaloud";
-const EDGE_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
+const EDGE_VERSION: &str = "155.0.4283.45";
+const EDGE_BASE: &str = "https://api.msedgeservices.com/tts/cognitiveservices";
+const EDGE_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0";
 const EDGE_ORIGIN: &str = "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold";
 const EDGE_MAX_AUDIO_BYTES: usize = 16 * 1024 * 1024;
 
@@ -282,7 +282,7 @@ fn edge_url(path: &str, websocket: bool) -> Result<Url, String> {
         .map_err(|_| "System time is invalid.".to_string())?
         .as_secs();
     url.query_pairs_mut()
-        .append_pair("TrustedClientToken", EDGE_TOKEN)
+        .append_pair("Ocp-Apim-Subscription-Key", EDGE_TOKEN)
         .append_pair("Sec-MS-GEC", &edge_gec(now))
         .append_pair("Sec-MS-GEC-Version", &format!("2-{EDGE_VERSION}"));
     if websocket {
@@ -292,7 +292,7 @@ fn edge_url(path: &str, websocket: bool) -> Result<Url, String> {
 }
 
 fn edge_cookie() -> Result<HeaderValue, String> {
-    let value = format!("muid={};", uuid::Uuid::new_v4().simple().to_string().to_uppercase());
+    let value = format!("MUID={}", uuid::Uuid::new_v4().simple().to_string().to_uppercase());
     HeaderValue::from_str(&value).map_err(|_| "Could not prepare Edge TTS request headers.".to_string())
 }
 
@@ -372,7 +372,7 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32) -> 
     if voice.trim().is_empty() {
         return Err("Choose an Edge Japanese voice first.".to_string());
     }
-    let url = edge_url("/edge/v1", true)?;
+    let url = edge_url("/websocket/v1", true)?;
     let mut request = url.as_str().into_client_request()
         .map_err(|_| "Could not prepare the Edge TTS websocket request.".to_string())?;
     request.headers_mut().insert(USER_AGENT, HeaderValue::from_static(EDGE_USER_AGENT));
@@ -381,7 +381,13 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32) -> 
 
     let result = tokio::time::timeout(Duration::from_secs(60), async move {
         let (mut socket, _) = connect_async(request).await
-            .map_err(|_| "Could not connect to the Microsoft Edge TTS websocket.".to_string())?;
+            .map_err(|error| match error {
+                tokio_tungstenite::tungstenite::Error::Http(response) => format!(
+                    "Microsoft Edge TTS websocket handshake failed with HTTP {}. Microsoft may have rejected the request; try again shortly.",
+                    response.status()
+                ),
+                other => format!("Could not connect to the Microsoft Edge TTS websocket: {other}"),
+            })?;
         let now = Utc::now();
         const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
