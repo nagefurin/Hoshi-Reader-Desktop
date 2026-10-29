@@ -39,6 +39,8 @@ pub struct TtsChapter {
     pub image_index_start: usize,
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct TtsVoiceInfo {
     pub id: String,
     pub styles: Vec<String>,
@@ -533,29 +535,73 @@ async fn tts_translator_voice_list() -> Result<Vec<TtsVoiceInfo>, String> {
     japanese_microsoft_voices(&bytes, "Microsoft Translator")
 }
 
-fn azure_ssml(text: &str, voice: &str, rate: f32, pitch: f32) -> String {
+fn azure_format(options: &TtsSynthesisOptions) -> String {
+    let sample_rate = options.sample_rate();
+    let khz = sample_rate / 1000;
+    if options.is_wav() {
+        format!("riff-{khz}khz-16bit-mono-pcm")
+    } else {
+        let bitrate = match sample_rate { 16000 => 64, 24000 => 96, _ => 192 };
+        format!("audio-{khz}khz-{bitrate}kbitrate-mono-mp3")
+    }
+}
+
+fn azure_ssml(text: &str, voice: &str, rate: f32, pitch: f32, options: &TtsSynthesisOptions) -> String {
     let rate_percent = ((rate.clamp(0.5, 2.0) - 1.0) * 100.0).round() as i32;
     let pitch = pitch.clamp(-12.0, 7.0).round() as i32;
+    let volume = options.volume(false).round() as i32;
+    let degree = if options.style_degree.is_finite() { options.style_degree.clamp(0.01, 2.0) } else { 1.0 };
+    let content = format!(
+        "<prosody rate=\"{:+}%\" pitch=\"{:+}st\" volume=\"{:+}%\">{}</prosody>",
+        rate_percent, pitch, volume, edge_xml(text)
+    );
+    let styled = if options.style.trim().is_empty() {
+        content
+    } else {
+        let role = if options.role.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" role=\"{}\"", edge_xml(&options.role))
+        };
+        format!(
+            "<mstts:express-as style=\"{}\" styledegree=\"{degree}\"{role}>{content}</mstts:express-as>",
+            edge_xml(&options.style)
+        )
+    };
+    let pauses = [
+        ("Leading-exact", options.leading_ms),
+        ("Tailing-exact", options.trailing_ms),
+        ("Comma-exact", options.comma_ms),
+        ("Semicolon-exact", options.semicolon_ms),
+        ("Enumerationcomma-exact", options.enumeration_comma_ms),
+        ("Sentenceboundary-exact", options.sentence_boundary_ms),
+    ].into_iter().filter_map(|(kind, value)| {
+        TtsSynthesisOptions::pause_ms(value).map(|ms| {
+            format!("<mstts:silence type=\"{kind}\" value=\"{ms}ms\"/>")
+        })
+    }).collect::<String>();
     format!(
-        "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"ja-JP\"><voice name=\"{}\"><prosody rate=\"{:+}%\" pitch=\"{:+}st\" volume=\"+0%\">{}</prosody></voice></speak>",
-        edge_xml(voice), rate_percent, pitch, edge_xml(text)
+        "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xmlns:mstts=\"https://www.w3.org/2001/mstts\" xml:lang=\"ja-JP\"><voice name=\"{}\">{pauses}{styled}</voice></speak>",
+        edge_xml(voice)
     )
 }
 
 async fn tts_azure_synthesize(
     client: &Client, region: &str, api_key: &str, text: &str, voice: &str, rate: f32, pitch: f32,
+    options: &TtsSynthesisOptions,
 ) -> Result<String, String> {
     if api_key.trim().is_empty() {
         return Err("Enter an Azure Speech subscription key first.".to_string());
     }
     let mut url = azure_base(region)?;
     url.set_path("/cognitiveservices/v1");
+    let output_format = azure_format(options);
     let response = client.post(url)
         .header("Ocp-Apim-Subscription-Key", api_key.trim())
-        .header("X-Microsoft-OutputFormat", "audio-24khz-96kbitrate-mono-mp3")
+        .header("X-Microsoft-OutputFormat", output_format)
         .header("User-Agent", "Hoshi Reader Desktop")
         .header(CONTENT_TYPE, "application/ssml+xml")
-        .body(azure_ssml(text, voice, rate, pitch))
+        .body(azure_ssml(text, voice, rate, pitch, options))
         .send().await
         .map_err(|error| format!("Could not connect to Azure Speech: {error}"))?;
     finish_audio(response).await
@@ -563,23 +609,31 @@ async fn tts_azure_synthesize(
 
 async fn tts_google_cloud_synthesize(
     client: &Client, api_key: &str, text: &str, voice: &str, rate: f32, pitch: f32,
+    options: &TtsSynthesisOptions,
 ) -> Result<String, String> {
     if api_key.trim().is_empty() {
         return Err("Enter a Google Cloud Text-to-Speech API key first.".to_string());
     }
     let voice = if voice.trim().is_empty() { "ja-JP-Neural2-B" } else { voice.trim() };
+    let mut audio_config = json!({
+        "audioEncoding": if options.is_wav() { "LINEAR16" } else { "MP3" },
+        "speakingRate": rate.clamp(0.25, 2.0),
+        "sampleRateHertz": options.sample_rate(),
+        "volumeGainDb": options.volume(true),
+    });
+    if !voice.contains("Chirp") && !voice.contains("Journey") {
+        audio_config["pitch"] = json!(pitch.clamp(-20.0, 20.0));
+    }
+    let profile = options.effects_profile.trim();
+    if !profile.is_empty() {
+        audio_config["effectsProfileId"] = json!([profile]);
+    }
     let response = client.post("https://texttospeech.googleapis.com/v1/text:synthesize")
         .header("X-Goog-Api-Key", api_key.trim())
         .json(&json!({
             "input": { "text": text },
             "voice": { "languageCode": "ja-JP", "name": voice },
-            "audioConfig": {
-                "audioEncoding": "MP3",
-                "speakingRate": rate.clamp(0.25, 2.0),
-                "sampleRateHertz": 24000,
-                "pitch": pitch.clamp(-20.0, 20.0),
-                "volumeGainDb": 0.0
-            }
+            "audioConfig": audio_config
         }))
         .send().await
         .map_err(|error| format!("Could not connect to Google Cloud Text-to-Speech: {error}"))?;
@@ -605,7 +659,7 @@ async fn tts_google_cloud_synthesize(
 }
 
 async fn tts_translator_synthesize(
-    client: &Client, text: &str, voice: &str, rate: f32, pitch: f32,
+    client: &Client, text: &str, voice: &str, rate: f32, pitch: f32, options: &TtsSynthesisOptions,
 ) -> Result<String, String> {
     let mut attempt = 0;
     loop {
@@ -614,10 +668,10 @@ async fn tts_translator_synthesize(
         url.set_path("/cognitiveservices/v1");
         let response = client.post(url)
             .bearer_auth(&token.bearer)
-            .header("X-Microsoft-OutputFormat", "audio-24khz-96kbitrate-mono-mp3")
+            .header("X-Microsoft-OutputFormat", azure_format(options))
             .header("User-Agent", "Hoshi Reader Desktop")
             .header(CONTENT_TYPE, "application/ssml+xml")
-            .body(azure_ssml(text, voice, rate, pitch))
+            .body(azure_ssml(text, voice, rate, pitch, options))
             .send().await
             .map_err(|error| format!("Could not connect to Microsoft Translator TTS: {error}"))?;
         if response.status().as_u16() == 401 && attempt == 0 {
@@ -781,13 +835,15 @@ fn edge_xml(value: &str) -> String {
     }).collect()
 }
 
-fn edge_ssml(text: &str, voice: &str, rate: f32, pitch: f32) -> String {
+fn edge_ssml(text: &str, voice: &str, rate: f32, pitch: f32, options: &TtsSynthesisOptions) -> String {
     let percentage = ((rate.clamp(0.5, 3.0) - 1.0) * 100.0).round() as i32;
+    let volume = options.volume(false).round() as i32;
     format!(
-        "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"ja-JP\"><voice name=\"{}\"><prosody rate=\"{:+}%\" pitch=\"{:+}Hz\" volume=\"+0%\">{}</prosody></voice></speak>",
+        "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"ja-JP\"><voice name=\"{}\"><prosody rate=\"{:+}%\" pitch=\"{:+}Hz\" volume=\"{:+}%\">{}</prosody></voice></speak>",
         edge_xml(voice),
         percentage,
         pitch.clamp(-50.0, 50.0).round() as i32,
+        volume,
         edge_xml(text)
     )
 }
@@ -808,7 +864,7 @@ fn edge_audio_frame(frame: &[u8]) -> Result<&[u8], String> {
     Ok(&frame[2 + header_length..])
 }
 
-async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32) -> Result<Vec<u8>, String> {
+async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32, options: &TtsSynthesisOptions) -> Result<Vec<u8>, String> {
     if voice.trim().is_empty() {
         return Err("Choose an Edge Japanese voice first.".to_string());
     }
@@ -837,7 +893,7 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32) -> 
         let speech = format!(
             "X-RequestId:{}\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:{timestamp}Z\r\nPath:ssml\r\n\r\n{}",
             uuid::Uuid::new_v4().simple(),
-            edge_ssml(text, voice, rate, pitch)
+            edge_ssml(text, voice, rate, pitch, options)
         );
         socket.send(Message::Text(config.into())).await
             .map_err(|_| "Could not send the Edge TTS audio configuration.".to_string())?;
@@ -917,6 +973,7 @@ pub async fn tts_synthesize(
     voice: String,
     rate: f32,
     pitch: f32,
+    options: TtsSynthesisOptions,
 ) -> Result<String, String> {
     if text.trim().is_empty() {
         return Err("There is no text to synthesize.".to_string());
@@ -926,7 +983,7 @@ pub async fn tts_synthesize(
 
     match engine.as_str() {
         "edge" => {
-            let bytes = tts_edge_synthesize(&text, &voice, rate, pitch).await?;
+            let bytes = tts_edge_synthesize(&text, &voice, rate, pitch, &options).await?;
             Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
         }
         "googleTranslate" => {
@@ -951,9 +1008,9 @@ pub async fn tts_synthesize(
             }
             Ok(STANDARD.encode(audio))
         }
-        "azure" => tts_azure_synthesize(&client, &base_url, &api_key, &text, &voice, rate, pitch).await,
-        "microsoftTranslator" => tts_translator_synthesize(&client, &text, &voice, rate, pitch).await,
-        "googleCloud" => tts_google_cloud_synthesize(&client, &api_key, &text, &voice, rate, pitch).await,
+        "azure" => tts_azure_synthesize(&client, &base_url, &api_key, &text, &voice, rate, pitch, &options).await,
+        "microsoftTranslator" => tts_translator_synthesize(&client, &text, &voice, rate, pitch, &options).await,
+        "googleCloud" => tts_google_cloud_synthesize(&client, &api_key, &text, &voice, rate, pitch, &options).await,
         "openAi" => {
             let base = validate_endpoint(&base_url)?;
             if model.trim().is_empty() || voice.trim().is_empty() {
@@ -965,7 +1022,7 @@ pub async fn tts_synthesize(
                 "input": text,
                 "voice": voice.trim(),
                 "speed": rate,
-                "response_format": "mp3"
+                "response_format": if options.is_wav() { "wav" } else { "mp3" }
             }));
             if !api_key.trim().is_empty() {
                 request = request.bearer_auth(api_key.trim());
