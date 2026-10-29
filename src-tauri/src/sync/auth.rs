@@ -14,7 +14,8 @@ use uuid::Uuid;
 use crate::sync::client::{self, GoogleDriveError};
 use crate::sync::gdrive::manager;
 
-const SERVICE: &str = "hoshi-reader";
+const SERVICE: &str = "hoshi-reader-nagefurin-fork";
+const ORIGINAL_SERVICE: &str = "hoshi-reader";
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 const CLIENT_ID: &str = match option_env!("HOSHI_GOOGLE_CLIENT_ID") {
     Some(id) => id,
@@ -39,6 +40,17 @@ pub fn init_store() {
     keyring_core::set_default_store(apple_native_keyring_store::keychain::Store::new().unwrap());
     #[cfg(windows)]
     keyring_core::set_default_store(windows_native_keyring_store::Store::new().unwrap());
+
+    // Seed the fork's independent credentials from the original installation once.
+    // Sign-out or re-authentication in the fork will never delete the original tokens.
+    for key in ["accessToken", "refreshToken", "clientId"] {
+        if let Ok(source) = keyring_core::Entry::new(ORIGINAL_SERVICE, key)
+            && let Ok(password) = source.get_password()
+        {
+            // Refresh the fork's copy from the original, never the other way around.
+            let _ = entry(key).set_password(&password);
+        }
+    }
 }
 
 fn entry(key: &str) -> keyring_core::Entry {

@@ -1,0 +1,57 @@
+name: Windows build
+run-name: Portable fork build (${{ github.ref_name }})
+
+on:
+  workflow_dispatch:
+
+env:
+  HOSHI_GOOGLE_CLIENT_ID: ${{ secrets.HOSHI_GOOGLE_CLIENT_ID }}
+  HOSHI_GOOGLE_CLIENT_SECRET: ${{ secrets.HOSHI_GOOGLE_CLIENT_SECRET }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    if: github.ref == 'refs/heads/portable-settings' || github.head_ref == 'portable-settings'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check frontend
+        run: pnpm check
+
+      - name: Build portable Windows executable
+        run: pnpm tauri build --no-bundle --ci
+
+      - name: Stage portable executable
+        shell: pwsh
+        run: Copy-Item "src-tauri/target/release/hoshi-reader.exe" "Hoshi-Reader-Fork.exe"
+
+      - name: Upload portable executable
+        uses: actions/upload-artifact@v6
+        with:
+          name: Hoshi-Reader-Fork-Portable
+          path: Hoshi-Reader-Fork.exe
+          if-no-files-found: error
+          retention-days: 14
