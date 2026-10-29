@@ -64,4 +64,4 @@ export const ttsConfig = store.config;
 export const saveTtsConfig = store.save;
 
 // Secrets are deliberately kept out of persisted settings and cleared when the app is restarted.
-export const ttsRuntime = $state({ apiKey: "" });
+export const ttsRuntime = $state({ apiKey: "", azureKey: "", googleCloudKey: "" });
