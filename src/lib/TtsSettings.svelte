@@ -6,7 +6,7 @@
   import SettingToggle from "./SettingToggle.svelte";
   import { sasayakiConfig, saveSasayakiConfig } from "./sasayakiConfig.svelte";
 
-  let { compact = false }: { compact?: boolean } = $props();
+  let { compact = false, bookId = "" }: { compact?: boolean; bookId?: string } = $props();
 
   let voices = $state<SpeechSynthesisVoice[]>([]);
   let edgeVoices = $state<string[]>([]);
@@ -141,7 +141,7 @@
   }
 
   function addReplacement() {
-    ttsConfig.replacements.push({ id: crypto.randomUUID(), pattern: "", replacement: "" });
+    ttsConfig.replacements.push({ id: crypto.randomUUID(), pattern: "", replacement: "", regex: false, bookId });
     save();
   }
 
@@ -415,16 +415,44 @@
   <p class="text-xs text-base-content/60">Auto-scroll follows the sentence being read. Image hold pauses speech on illustrated pages; auto-scroll must be enabled for image holds to run.</p>
 </SettingsSection>
 
-<SettingsSection compact={compact} title="Pronunciation Replacements">
-  <p class="mb-1 text-xs text-base-content/60">Rules are applied in order to the book text before it is spoken. Patterns are JavaScript regular expressions. Online providers receive the text being synthesized.</p>
+<SettingsSection compact={compact} title="Pronunciation Dictionary">
+  <p class="mb-1 text-xs text-base-content/60">Rules run in order before synthesis. Each rule can replace literal text or use a JavaScript regular expression. Rules can apply globally or only to the current book.</p>
   {#each ttsConfig.replacements as rule (rule.id)}
-    <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
-      <input class="input input-sm min-w-0" bind:value={rule.pattern} onchange={save} placeholder="Pattern (regex)" aria-label="Pronunciation pattern" />
-      <input class="input input-sm min-w-0" bind:value={rule.replacement} onchange={save} placeholder="Replacement" aria-label="Pronunciation replacement" />
-      <button class="btn btn-ghost btn-sm btn-square text-error" title="Remove rule" onclick={() => removeReplacement(rule.id)}>×</button>
+    <div class="flex flex-col gap-2 rounded-box border border-base-300 p-2">
+      <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
+        <input class="input input-sm min-w-0" bind:value={rule.pattern} onchange={save} placeholder="Text / regex pattern" aria-label="Pronunciation pattern" />
+        <input class="input input-sm min-w-0" bind:value={rule.replacement} onchange={save} placeholder="Reading / replacement" aria-label="Pronunciation replacement" />
+        <button class="btn btn-ghost btn-sm btn-square text-error" title="Remove rule" onclick={() => removeReplacement(rule.id)}>×</button>
+      </div>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <label class="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            class="checkbox checkbox-xs"
+            checked={rule.regex ?? true}
+            onchange={(event) => { rule.regex = event.currentTarget.checked; save(); }}
+          />
+          Regular expression
+        </label>
+        <select
+          class="select select-xs max-w-full"
+          value={rule.bookId ? (bookId && rule.bookId === bookId ? "book" : "other") : "global"}
+          onchange={(event) => {
+            if (event.currentTarget.value === "book" && bookId) rule.bookId = bookId;
+            else if (event.currentTarget.value === "global") rule.bookId = "";
+            save();
+          }}
+        >
+          <option value="global">All books</option>
+          {#if rule.bookId && (!bookId || rule.bookId !== bookId)}
+            <option value="other">Book-specific: {rule.bookId}</option>
+          {/if}
+          <option value="book" disabled={!bookId}>This book only</option>
+        </select>
+      </div>
     </div>
   {/each}
   <div>
-    <button class="btn btn-outline btn-sm" onclick={addReplacement}>Add replacement</button>
+    <button class="btn btn-outline btn-sm" onclick={addReplacement}>Add dictionary rule</button>
   </div>
 </SettingsSection>
