@@ -14,6 +14,7 @@ export type TtsConfig = {
   splitDialogue: boolean;
   useRubyReadings: boolean;
   rate: number;
+  playbackRate: number;
   pitch: number;
   volume: number;
   endpoint: string;
@@ -34,6 +35,7 @@ const defaults: TtsConfig = {
   splitDialogue: true,
   useRubyReadings: true,
   rate: 1,
+  playbackRate: 1,
   pitch: 1,
   volume: 1,
   endpoint: "",
