@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { AudioLines, Pause, Play, SkipBack, SkipForward, Square } from "@lucide/svelte";
   import { ttsConfig, ttsRuntime } from "./ttsConfig.svelte";
+  import TtsSettings from "./TtsSettings.svelte";
 
   type TtsChapter = {
     spineIndex: number;
@@ -226,6 +227,7 @@
         errorMessage = "System TTS error: " + event.error;
         active = false;
         paused = false;
+        onClearHighlight();
       };
       currentUtterance = utterance;
       onReadSegment(segment.chapterIndex, segment.sourceText);
@@ -260,6 +262,7 @@
         errorMessage = "The generated audio could not be played.";
         active = false;
         paused = false;
+        onClearHighlight();
       };
       currentAudio = audio;
       onReadSegment(segment.chapterIndex, segment.sourceText);
@@ -369,5 +372,11 @@
       <span class="break-words text-xs">{errorMessage}</span>
     </div>
   {/if}
-  <p class="mt-auto text-xs text-base-content/50">Adjust voices and pronunciation in Settings → Text-to-Speech.</p>
+  <details class="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
+    <summary class="collapse-title min-h-0 py-3 text-sm font-medium">Text-to-Speech settings</summary>
+    <div class="collapse-content overflow-x-hidden">
+      <TtsSettings />
+    </div>
+  </details>
+  <p class="text-xs text-base-content/50">The active sentence is highlighted in the book while it is being spoken.</p>
 </div>
