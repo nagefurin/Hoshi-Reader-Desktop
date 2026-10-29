@@ -80,6 +80,24 @@
   let googleCloudVoiceLoading = $state(false);
   let googleCloudVoiceError = $state("");
 
+  type VoiceSettingKey =
+    | "edgeVoice" | "edgeDialogueVoice" | "azureVoice" | "azureDialogueVoice"
+    | "microsoftTranslatorVoice" | "microsoftTranslatorDialogueVoice"
+    | "googleCloudVoice" | "googleCloudDialogueVoice";
+
+  function selectVoice(key: VoiceSettingKey, value: string) {
+    ttsConfig[key] = value;
+    if (key === "azureVoice" || key === "microsoftTranslatorVoice") {
+      const list = key === "azureVoice" ? azureVoices : translatorVoices;
+      const selected = list.find((voice) => voice.id === value);
+      const options = currentOptions();
+      const style = selected?.styles.includes(options.style) ? options.style : "";
+      const role = style && selected?.roles.includes(options.role) ? options.role : "";
+      updateOptions({ style, role });
+    }
+    saveTtsConfig();
+  }
+
   function changeEngine(value: string) {
     const previous = ttsConfig.engine;
     const next = value as TtsEngine;
@@ -245,7 +263,7 @@
   {:else if ttsConfig.engine === "edge"}
     <SettingRow compact={compact} label="Narration Voice">
       <div class="flex max-w-lg flex-1 items-center gap-2">
-        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.edgeVoice} onchange={save}>
+        <select class="select select-sm min-w-0 flex-1" value={ttsConfig.edgeVoice} onchange={(event) => selectVoice("edgeVoice", event.currentTarget.value)}>
           {#if edgeVoices.length === 0}
             <option value={ttsConfig.edgeVoice}>{ttsConfig.edgeVoice || "Load voices"}</option>
           {/if}
@@ -279,7 +297,7 @@
     </SettingRow>
     <SettingRow compact={compact} label="Narration Voice">
       <div class="flex max-w-lg flex-1 items-center gap-2">
-        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.azureVoice} onchange={save}>
+        <select class="select select-sm min-w-0 flex-1" value={ttsConfig.azureVoice} onchange={(event) => selectVoice("azureVoice", event.currentTarget.value)}>
           {#if azureVoices.length === 0}<option value={ttsConfig.azureVoice}>{ttsConfig.azureVoice}</option>{/if}
           {#each azureVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
         </select>
@@ -296,7 +314,7 @@
   {:else if ttsConfig.engine === "microsoftTranslator"}
     <SettingRow compact={compact} label="Narration Voice">
       <div class="flex max-w-lg flex-1 items-center gap-2">
-        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.microsoftTranslatorVoice} onchange={save}>
+        <select class="select select-sm min-w-0 flex-1" value={ttsConfig.microsoftTranslatorVoice} onchange={(event) => selectVoice("microsoftTranslatorVoice", event.currentTarget.value)}>
           {#if translatorVoices.length === 0}<option value={ttsConfig.microsoftTranslatorVoice}>{ttsConfig.microsoftTranslatorVoice}</option>{/if}
           {#each translatorVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
         </select>
@@ -317,7 +335,7 @@
     </SettingRow>
     <SettingRow compact={compact} label="Narration Voice">
       <div class="flex max-w-lg flex-1 items-center gap-2">
-        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.googleCloudVoice} onchange={save}>
+        <select class="select select-sm min-w-0 flex-1" value={ttsConfig.googleCloudVoice} onchange={(event) => selectVoice("googleCloudVoice", event.currentTarget.value)}>
           {#if googleCloudVoices.length === 0}<option value={ttsConfig.googleCloudVoice}>{ttsConfig.googleCloudVoice}</option>{/if}
           {#each googleCloudVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
         </select>
