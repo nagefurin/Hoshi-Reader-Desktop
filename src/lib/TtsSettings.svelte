@@ -68,6 +68,7 @@
 
   let voices = $state<SpeechSynthesisVoice[]>([]);
   let systemVoiceCount = $state(0);
+  let systemVoiceSummary = $state("");
   let edgeVoices = $state<TtsVoiceInfo[]>([]);
   let edgeVoiceLoading = $state(false);
   let edgeVoiceError = $state("");
@@ -202,6 +203,7 @@
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const listed = window.speechSynthesis.getVoices();
     systemVoiceCount = listed.length;
+    systemVoiceSummary = listed.slice(0, 5).map((voice) => `${voice.name} (${voice.lang})`).join(", ");
     voices = listed
       .filter((voice) => voice.lang.trim().toLowerCase().startsWith("ja"))
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -281,8 +283,9 @@
             : `Windows exposes ${systemVoiceCount} system voice(s), but none is Japanese. Device TTS cannot pronounce Japanese correctly without an installed Japanese speech voice.`}
         </p>
         {#if systemVoiceCount > 0}
+          <p class="text-xs text-base-content/60">Voices exposed to Hoshi: {systemVoiceSummary || "Names unavailable"}.</p>
           <p class="text-xs text-base-content/60">
-            In Windows, install a Japanese speech voice under Settings → Time & language → Language & region → Japanese → Language options → Speech, then refresh the voices and restart Hoshi if it still does not appear. Microsoft Edge (online) works without a local voice.
+            In Windows, open Settings → Time & language → Language & region → Japanese → Language options, then install the Speech feature if offered. Restart Hoshi and refresh the voices afterward. Narrator's separately downloaded natural voices may not be exposed to the WebView speech API. Microsoft Edge (online) works without a local voice.
           </p>
         {/if}
         <button class="btn btn-outline btn-xs" onclick={refreshSystemVoices}>Refresh system voices</button>
