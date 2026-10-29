@@ -21,6 +21,7 @@
     text: string;
     sourceText: string;
     imagesBefore: number[];
+    imagesAfter: number[];
     dialogue: boolean;
   };
 
@@ -31,6 +32,7 @@
     lookupActive = false,
     continuousMode = false,
     onReadSegment,
+    onHoldImages,
     onClearHighlight,
   }: {
     id: string;
@@ -39,6 +41,7 @@
     lookupActive?: boolean;
     continuousMode?: boolean;
     onReadSegment: (spineIndex: number, sourceText: string, imagesBefore: number[]) => Promise<void>;
+    onHoldImages: (spineIndex: number, sourceText: string, images: number[]) => Promise<void>;
     onClearHighlight: () => void;
   } = $props();
 
@@ -135,6 +138,7 @@
       let sourceSearchFrom = 0;
       let imageCursor = 0;
       const imageOffsets = chapter.imageOffsets ?? [];
+      const firstChapterSegment = result.length;
 
       for (let paragraphIndex = 0; paragraphIndex < sourceParagraphs.length; paragraphIndex++) {
         const paragraph = sourceParagraphs[paragraphIndex];
@@ -177,11 +181,21 @@
                 text: applyReplacements(speech),
                 sourceText: source,
                 imagesBefore,
+                imagesAfter: [],
                 dialogue: part.dialogue,
               });
             }
           }
         }
+      }
+
+      const trailingImages: number[] = [];
+      while (imageCursor < imageOffsets.length) {
+        trailingImages.push(continuousMode ? (chapter.imageIndexStart + imageCursor) : imageCursor);
+        imageCursor++;
+      }
+      if (trailingImages.length && result.length > firstChapterSegment) {
+        result[result.length - 1].imagesAfter.push(...trailingImages);
       }
     }
     return result;
@@ -253,6 +267,11 @@
 
   async function advanceAfterSegment(segmentIndex: number, token: number) {
     if (token !== runId || !active) return;
+    const segment = segments[segmentIndex];
+    if (segment?.imagesAfter.length) {
+      await onHoldImages(segment.chapterIndex, segment.sourceText, segment.imagesAfter);
+      if (token !== runId || !active) return;
+    }
     pendingNextPosition = segmentIndex + 1;
     const pauseMs = Math.min(2000, Math.max(0, Math.round(Number(ttsConfig.sentencePauseMs) || 0)));
     waitingBetweenSentences = pauseMs > 0;
