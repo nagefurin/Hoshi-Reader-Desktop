@@ -317,8 +317,12 @@ async fn tts_edge_voice_list() -> Result<Vec<String>, String> {
     if bytes.len() > 5 * 1024 * 1024 {
         return Err("Edge TTS voice list response was unexpectedly large.".to_string());
     }
-    let values: Vec<EdgeVoice> = serde_json::from_slice(&bytes)
-        .map_err(|_| "Microsoft Edge TTS returned an invalid voice list.".to_string())?;
+    let content_type = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("unknown content type").to_string();
+    let status = response.status();
+    let values: Vec<EdgeVoice> = serde_json::from_slice(&bytes).map_err(|error| {
+        let preview = String::from_utf8_lossy(&bytes).chars().take(240).collect::<String>();
+        format!("Microsoft Edge TTS returned an invalid voice list (HTTP {status}, {content_type}): {error}. Response: {preview}")
+    })?;
     let mut voices: Vec<String> = values.into_iter()
         .filter(|voice| voice.locale.eq_ignore_ascii_case("ja-JP"))
         .map(|voice| voice.short_name)
@@ -380,15 +384,6 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32) -> 
     request.headers_mut().insert(COOKIE, edge_cookie()?);
     request.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     request.headers_mut().insert(PRAGMA, HeaderValue::from_static("no-cache"));
-
-    let legacy_url = edge_legacy_url("/edge/v1", true)?;
-    let mut legacy_request = legacy_url.as_str().into_client_request()
-        .map_err(|_| "Could not prepare the legacy Edge TTS websocket request.".to_string())?;
-    legacy_request.headers_mut().insert(USER_AGENT, HeaderValue::from_static(EDGE_USER_AGENT));
-    legacy_request.headers_mut().insert(ORIGIN, HeaderValue::from_static(EDGE_ORIGIN));
-    legacy_request.headers_mut().insert(COOKIE, edge_cookie()?);
-    legacy_request.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-    legacy_request.headers_mut().insert(PRAGMA, HeaderValue::from_static("no-cache"));
 
     let result = tokio::time::timeout(Duration::from_secs(60), async move {
         let (mut socket, _) = connect_async(request).await
