@@ -479,6 +479,9 @@
     <button class="btn btn-ghost btn-square" title="Previous sentence" onclick={previous} disabled={!segments.length || loading}>
       <SkipBack class="size-4" />
     </button>
+    <button class="btn btn-ghost btn-square" title="Repeat sentence" onclick={() => jumpTo(position)} disabled={!segments.length || loading}>
+      <Repeat class="size-4" />
+    </button>
     <button class="btn btn-primary btn-circle" title={paused ? "Resume" : active ? "Pause" : "Start"} onclick={togglePlayback} disabled={loading}>
       {#if active && !paused}
         <Pause class="size-5" />
