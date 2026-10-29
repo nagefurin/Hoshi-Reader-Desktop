@@ -641,6 +641,11 @@
       case "tts-clear":
         r.clearTtsHighlight();
         break;
+      case "tts-image": {
+        const result = r.scrollToSasayakiImage(m.index);
+        if (typeof result?.progress === "number") commitProgress(result.progress);
+        break;
+      }
       case "sasayaki-cues":
         applyCues(m.cues);
         break;
