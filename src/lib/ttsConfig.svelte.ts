@@ -15,6 +15,8 @@ export type TtsConfig = {
   useRubyReadings: boolean;
   rate: number;
   playbackRate: number;
+  sentencePauseMs: number;
+  prefetchSentences: number;
   pitch: number;
   volume: number;
   endpoint: string;
@@ -41,6 +43,8 @@ const defaults: TtsConfig = {
   useRubyReadings: true,
   rate: 1,
   playbackRate: 1,
+  sentencePauseMs: 0,
+  prefetchSentences: 5,
   pitch: 1,
   volume: 1,
   endpoint: "",
