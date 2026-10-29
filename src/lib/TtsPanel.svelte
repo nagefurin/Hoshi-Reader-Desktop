@@ -294,18 +294,26 @@
       const encoded = await invoke<string>("tts_synthesize", {
         engine: ttsConfig.engine,
         text: segment.text,
-        baseUrl: ttsConfig.endpoint,
-        apiKey: ttsRuntime.apiKey,
+        baseUrl: ttsConfig.engine === "azure" ? ttsConfig.azureRegion : ttsConfig.endpoint,
+        apiKey: ttsConfig.engine === "azure"
+          ? ttsRuntime.azureKey
+          : ttsConfig.engine === "googleCloud"
+            ? ttsRuntime.googleCloudKey
+            : ttsRuntime.apiKey,
         model: ttsConfig.model,
-        voice: segment.dialogue
-          ? ttsConfig.engine === "edge"
-            ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice)
-            : (ttsConfig.remoteDialogueVoice || ttsConfig.remoteVoice)
-          : ttsConfig.engine === "edge" ? ttsConfig.edgeVoice : ttsConfig.remoteVoice,
+        voice: ttsConfig.engine === "edge"
+          ? (segment.dialogue ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice) : ttsConfig.edgeVoice)
+          : ttsConfig.engine === "azure"
+            ? (segment.dialogue ? (ttsConfig.azureDialogueVoice || ttsConfig.azureVoice) : ttsConfig.azureVoice)
+            : ttsConfig.engine === "microsoftTranslator"
+              ? (segment.dialogue ? (ttsConfig.microsoftTranslatorDialogueVoice || ttsConfig.microsoftTranslatorVoice) : ttsConfig.microsoftTranslatorVoice)
+              : ttsConfig.engine === "googleCloud"
+                ? (segment.dialogue ? (ttsConfig.googleCloudDialogueVoice || ttsConfig.googleCloudVoice) : ttsConfig.googleCloudVoice)
+                : ttsConfig.engine === "googleTranslate"
+                  ? "ja"
+                  : segment.dialogue ? (ttsConfig.remoteDialogueVoice || ttsConfig.remoteVoice) : ttsConfig.remoteVoice,
         rate: Number(ttsConfig.rate) || 1,
         pitch: Number(ttsConfig.pitch) || 0,
-        vitsModel: ttsConfig.vitsModel,
-        speakerId: Math.max(0, Math.round(Number(ttsConfig.speakerId) || 0)),
       });
       if (token !== runId) return;
       const audio = new Audio("data:audio/mpeg;base64," + encoded);
@@ -389,7 +397,12 @@
       <p class="text-sm font-semibold">Text-to-Speech</p>
       <p class="line-clamp-2 text-xs text-base-content/60">{title}</p>
       <p class="mt-1 text-xs text-base-content/60">
-        {ttsConfig.engine === "device" ? "System voice" : ttsConfig.engine === "edge" ? "Microsoft Edge TTS" : ttsConfig.engine === "googleTranslate" ? "Google Translate" : ttsConfig.engine === "openAi" ? "OpenAI-compatible" : "VITS self-hosted"}
+        {ttsConfig.engine === "device" ? "System voice" :
+          ttsConfig.engine === "edge" ? "Microsoft Edge TTS" :
+          ttsConfig.engine === "azure" ? "Microsoft Azure Speech" :
+          ttsConfig.engine === "microsoftTranslator" ? "Microsoft Translator" :
+          ttsConfig.engine === "googleCloud" ? "Google Cloud Text-to-Speech" :
+          ttsConfig.engine === "googleTranslate" ? "Google Translate" : "OpenAI-compatible / custom"}
       </p>
     </div>
   </div>
