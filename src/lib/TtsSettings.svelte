@@ -40,6 +40,32 @@
     saveTtsConfig();
   }
 
+  type PauseKey = "leadingMs" | "trailingMs" | "commaMs" | "semicolonMs" | "enumerationCommaMs" | "sentenceBoundaryMs";
+  const pauseControls: { label: string; key: PauseKey }[] = [
+    { label: "Leading Pause", key: "leadingMs" },
+    { label: "Trailing Pause", key: "trailingMs" },
+    { label: "Comma Pause", key: "commaMs" },
+    { label: "Semicolon Pause", key: "semicolonMs" },
+    { label: "Enumeration Comma Pause", key: "enumerationCommaMs" },
+    { label: "Sentence Boundary Pause", key: "sentenceBoundaryMs" },
+  ];
+  function setPauseValue(key: PauseKey, value: number) {
+    updateOptions({ [key]: value });
+  }
+
+  const currentVoice = $derived.by(() => {
+    const engine = ttsConfig.engine;
+    const voiceId = engine === "edge" ? ttsConfig.edgeVoice
+      : engine === "azure" ? ttsConfig.azureVoice
+      : engine === "microsoftTranslator" ? ttsConfig.microsoftTranslatorVoice
+      : engine === "googleCloud" ? ttsConfig.googleCloudVoice : "";
+    const list = engine === "edge" ? edgeVoices
+      : engine === "azure" ? azureVoices
+      : engine === "microsoftTranslator" ? translatorVoices
+      : engine === "googleCloud" ? googleCloudVoices : [];
+    return list.find((voice) => voice.id === voiceId);
+  });
+
   let voices = $state<SpeechSynthesisVoice[]>([]);
   let edgeVoices = $state<TtsVoiceInfo[]>([]);
   let edgeVoiceLoading = $state(false);
@@ -235,8 +261,8 @@
     <SettingRow compact={compact} label="Dialogue Voice">
       <select class="select select-sm w-52" bind:value={ttsConfig.edgeDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
-        {#each edgeVoices as voice (voice)}
-          <option value={voice}>{voice}</option>
+        {#each edgeVoices as voice (voice.id)}
+          <option value={voice.id}>{voice.id}</option>
         {/each}
       </select>
     </SettingRow>
