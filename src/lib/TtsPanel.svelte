@@ -240,6 +240,7 @@
         model: ttsConfig.model,
         voice: ttsConfig.remoteVoice,
         rate: Number(ttsConfig.rate) || 1,
+        pitch: Number(ttsConfig.pitch) || 0,
         vitsModel: ttsConfig.vitsModel,
         speakerId: Math.max(0, Math.round(Number(ttsConfig.speakerId) || 0)),
       });

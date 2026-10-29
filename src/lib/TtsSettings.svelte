@@ -1,9 +1,45 @@
 <script lang="ts">
-  import { ttsConfig, ttsRuntime, saveTtsConfig } from "./ttsConfig.svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsEngine } from "./ttsConfig.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
 
   let voices = $state<SpeechSynthesisVoice[]>([]);
+  let edgeVoices = $state<string[]>([]);
+  let edgeVoiceLoading = $state(false);
+  let edgeVoiceError = $state("");
+
+  function changeEngine(value: string) {
+    const previous = ttsConfig.engine;
+    const next = value as TtsEngine;
+    if (next === "edge" && previous !== "edge") ttsConfig.pitch = 0;
+    if (next === "device" && previous === "edge") ttsConfig.pitch = 1;
+    ttsConfig.engine = next;
+    saveTtsConfig();
+  }
+
+  async function refreshEdgeVoices() {
+    edgeVoiceLoading = true;
+    edgeVoiceError = "";
+    try {
+      edgeVoices = await invoke<string[]>("tts_edge_voices");
+      if (edgeVoices.length && !edgeVoices.includes(ttsConfig.remoteVoice)) {
+        ttsConfig.remoteVoice = edgeVoices.includes("ja-JP-NanamiNeural")
+          ? "ja-JP-NanamiNeural"
+          : edgeVoices[0];
+        saveTtsConfig();
+      }
+      if (!edgeVoices.length) edgeVoiceError = "No Japanese Edge voices were returned.";
+    } catch (error) {
+      edgeVoiceError = String(error);
+    } finally {
+      edgeVoiceLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (ttsConfig.engine === "edge") void refreshEdgeVoices();
+  });
 
   $effect(() => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
@@ -37,8 +73,9 @@
 
 <SettingsSection title="Speech Engine">
   <SettingRow label="Provider">
-    <select class="select select-sm w-52" bind:value={ttsConfig.engine} onchange={save}>
+    <select class="select select-sm w-52" value={ttsConfig.engine} onchange={(event) => changeEngine(event.currentTarget.value)}>
       <option value="device">Device / system voice</option>
+      <option value="edge">Microsoft Edge (online)</option>
       <option value="googleTranslate">Google Translate (online)</option>
       <option value="openAi">OpenAI-compatible endpoint</option>
       <option value="vits">VITS (self-hosted)</option>
@@ -65,6 +102,26 @@
     {#if voices.length === 0}
       <p class="text-xs text-base-content/60">No system voices have been listed yet. Install a voice for your language in the operating system's speech settings.</p>
     {/if}
+  {:else if ttsConfig.engine === "edge"}
+    <SettingRow label="Japanese Voice">
+      <div class="flex max-w-lg flex-1 items-center gap-2">
+        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.remoteVoice} onchange={save}>
+          {#if edgeVoices.length === 0}
+            <option value={ttsConfig.remoteVoice}>{ttsConfig.remoteVoice || "Load voices"}</option>
+          {/if}
+          {#each edgeVoices as voice (voice)}
+            <option value={voice}>{voice}</option>
+          {/each}
+        </select>
+        <button class="btn btn-outline btn-sm" onclick={refreshEdgeVoices} disabled={edgeVoiceLoading}>
+          {edgeVoiceLoading ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+    </SettingRow>
+    {#if edgeVoiceError}
+      <p class="text-xs text-error">{edgeVoiceError}</p>
+    {/if}
+    <p class="text-xs text-base-content/60">Edge TTS is an online Microsoft service and does not require an API key. Voice availability may change on the service side.</p>
   {:else if ttsConfig.engine === "openAi" || ttsConfig.engine === "vits"}
     <SettingRow label="Base URL">
       <input
@@ -109,11 +166,21 @@
       <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.rate).toFixed(1)}x</span>
     </div>
   </SettingRow>
-  {#if ttsConfig.engine === "device"}
-    <SettingRow label="Pitch">
+  {#if ttsConfig.engine === "device" || ttsConfig.engine === "edge"}
+    <SettingRow label={ttsConfig.engine === "edge" ? "Pitch (Hz)" : "Pitch"}>
       <div class="flex w-56 items-center gap-3">
-        <input class="range range-xs flex-1" type="range" min="0.5" max="2" step="0.1" bind:value={ttsConfig.pitch} oninput={save} />
-        <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.pitch).toFixed(1)}</span>
+        <input
+          class="range range-xs flex-1"
+          type="range"
+          min={ttsConfig.engine === "edge" ? -50 : 0.5}
+          max={ttsConfig.engine === "edge" ? 50 : 2}
+          step={ttsConfig.engine === "edge" ? 1 : 0.1}
+          bind:value={ttsConfig.pitch}
+          oninput={save}
+        />
+        <span class="w-10 text-right text-xs tabular-nums">
+          {ttsConfig.engine === "edge" ? `${Number(ttsConfig.pitch) > 0 ? "+" : ""}${Number(ttsConfig.pitch).toFixed(0)} Hz` : Number(ttsConfig.pitch).toFixed(1)}
+        </span>
       </div>
     </SettingRow>
   {/if}

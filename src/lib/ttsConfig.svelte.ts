@@ -1,6 +1,6 @@
 import { persisted } from "./persisted.svelte";
 
-export type TtsEngine = "device" | "googleTranslate" | "openAi" | "vits";
+export type TtsEngine = "device" | "edge" | "googleTranslate" | "openAi" | "vits";
 export type TtsReplacement = {
   id: string;
   pattern: string;
