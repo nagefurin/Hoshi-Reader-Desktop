@@ -26,9 +26,6 @@ use tauri::AppHandle;
 use tokio::sync::Mutex;
 
 #[cfg(windows)]
-use windows_future::AsyncStatus;
-
-#[cfg(windows)]
 use windows::{
     Media::SpeechSynthesis::SpeechSynthesizer,
     Storage::Streams::DataReader,
