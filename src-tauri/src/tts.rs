@@ -210,14 +210,14 @@ async fn custom_tts_json_response(response: reqwest::Response, provider: &str) -
 
 fn custom_vits_speaker(value: &str) -> Option<(&'static str, &'static str, u32)> {
     let (model, id) = value.split_once(':')?;
-    let path = match model {
-        "VITS" => "vits",
-        "W2V2-VITS" => "w2v2-vits",
-        "BERT-VITS2" => "bert-vits2",
-        "GPT-SOVITS" => "gpt-sovits",
+    let (canonical_model, path) = match model {
+        "VITS" => ("VITS", "vits"),
+        "W2V2-VITS" => ("W2V2-VITS", "w2v2-vits"),
+        "BERT-VITS2" => ("BERT-VITS2", "bert-vits2"),
+        "GPT-SOVITS" => ("GPT-SOVITS", "gpt-sovits"),
         _ => return None,
     };
-    Some((model, path, id.parse::<u32>().ok()?))
+    Some((canonical_model, path, id.parse::<u32>().ok()?))
 }
 
 #[derive(Serialize, Deserialize, Clone)]
