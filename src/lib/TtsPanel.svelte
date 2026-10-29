@@ -211,7 +211,7 @@
       ? (ttsConfig.googleCloudDialogueVoice || ttsConfig.googleCloudVoice)
       : ttsConfig.googleCloudVoice;
     if (ttsConfig.engine === "googleTranslate") return "ja";
-    return segment.dialogue ? (ttsConfig.remoteDialogueVoice || ttsConfig.remoteVoice) : ttsConfig.remoteVoice;
+    return "ja";
   }
 
   function synthesisFingerprint(): string {
@@ -220,9 +220,9 @@
       ttsConfig.edgeVoice, ttsConfig.edgeDialogueVoice, ttsConfig.azureRegion,
       ttsConfig.azureVoice, ttsConfig.azureDialogueVoice, ttsConfig.microsoftTranslatorVoice,
       ttsConfig.microsoftTranslatorDialogueVoice, ttsConfig.googleCloudVoice,
-      ttsConfig.googleCloudDialogueVoice, ttsConfig.remoteVoice, ttsConfig.remoteDialogueVoice,
+      ttsConfig.googleCloudDialogueVoice,
       ttsConfig.providerOptions[ttsConfig.engine],
-      ttsRuntime.apiKey, ttsRuntime.azureKey, ttsRuntime.googleCloudKey,
+      ttsRuntime.azureKey, ttsRuntime.googleCloudKey,
     ]);
   }
 
@@ -237,13 +237,12 @@
     promise = invoke<string>("tts_synthesize", {
       engine: ttsConfig.engine,
       text: segment.text,
-      baseUrl: ttsConfig.engine === "azure" ? ttsConfig.azureRegion : ttsConfig.endpoint,
+      baseUrl: ttsConfig.engine === "azure" ? ttsConfig.azureRegion : "",
       apiKey: ttsConfig.engine === "azure"
         ? ttsRuntime.azureKey
         : ttsConfig.engine === "googleCloud"
           ? ttsRuntime.googleCloudKey
-          : ttsRuntime.apiKey,
-      model: ttsConfig.model,
+          : "",
       voice: synthesisVoice(segment),
       rate: Number(ttsConfig.rate) || 1,
       pitch: Number(ttsConfig.pitch) || 0,
@@ -398,7 +397,7 @@
     try {
       const encoded = await synthesizedAudio(segmentIndex);
       if (token !== runId) return;
-      const audioFormat = ["azure", "microsoftTranslator", "googleCloud", "openAi"].includes(ttsConfig.engine)
+      const audioFormat = ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)
         ? ttsConfig.providerOptions[ttsConfig.engine]?.format ?? "mp3"
         : "mp3";
       const mimeType = audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
@@ -495,7 +494,7 @@
           ttsConfig.engine === "azure" ? "Microsoft Azure Speech" :
           ttsConfig.engine === "microsoftTranslator" ? "Microsoft Translator" :
           ttsConfig.engine === "googleCloud" ? "Google Cloud Text-to-Speech" :
-          ttsConfig.engine === "googleTranslate" ? "Google Translate" : "OpenAI-compatible / custom"}
+          "Google Translate"}
       </p>
     </div>
   </div>
