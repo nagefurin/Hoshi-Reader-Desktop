@@ -315,17 +315,7 @@ const EDGE_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWe
 const EDGE_ORIGIN: &str = "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold";
 const EDGE_MAX_AUDIO_BYTES: usize = 16 * 1024 * 1024;
 
-#[derive(Deserialize)]
-struct EdgeVoice {
-    #[serde(rename = "Locale")]
-    locale: String,
-    #[serde(rename = "ShortName")]
-    short_name: String,
-    #[serde(rename = "StyleList", default)]
-    styles: Option<Vec<String>>,
-    #[serde(rename = "RolePlayList", default)]
-    roles: Option<Vec<String>>,
-}
+
 
 #[derive(Clone)]
 struct MicrosoftTranslatorToken {
@@ -338,19 +328,32 @@ static MICROSOFT_TRANSLATOR_TOKEN: LazyLock<Mutex<Option<MicrosoftTranslatorToke
     LazyLock::new(|| Mutex::new(None));
 
 fn japanese_microsoft_voices(bytes: &[u8], provider: &str) -> Result<Vec<TtsVoiceInfo>, String> {
-    let values: Vec<EdgeVoice> = serde_json::from_slice(bytes).map_err(|error| {
+    let root: Value = serde_json::from_slice(bytes).map_err(|error| {
         let preview = String::from_utf8_lossy(bytes).chars().take(240).collect::<String>();
         format!("{provider} returned an invalid voice list: {error}. Response: {preview}")
     })?;
-    let mut voices: Vec<TtsVoiceInfo> = values.into_iter()
-        .filter(|voice| voice.locale.eq_ignore_ascii_case("ja-JP"))
-        .filter(|voice| !voice.short_name.trim().is_empty())
-        .map(|voice| TtsVoiceInfo {
-            id: voice.short_name,
-            styles: voice.styles.unwrap_or_default(),
-            roles: voice.roles.unwrap_or_default(),
-        })
-        .collect();
+    let values = root.as_array().ok_or_else(|| {
+        let preview = String::from_utf8_lossy(bytes).chars().take(240).collect::<String>();
+        format!("{provider} returned an invalid voice list: expected a JSON array. Response: {preview}")
+    })?;
+    let mut voices: Vec<TtsVoiceInfo> = Vec::new();
+    for value in values {
+        let Some(locale) = value.get("Locale").and_then(Value::as_str) else { continue };
+        if !locale.eq_ignore_ascii_case("ja-JP") {
+            continue;
+        }
+        let id = value.get("ShortName").and_then(Value::as_str)
+            .ok_or_else(|| format!("{provider} voice entry did not contain ShortName."))?;
+        let read_list = |key: &str| -> Vec<String> {
+            value.get(key).and_then(Value::as_array).into_iter().flatten()
+                .filter_map(Value::as_str).map(str::to_string).collect()
+        };
+        voices.push(TtsVoiceInfo {
+            id: id.to_string(),
+            styles: read_list("StyleList"),
+            roles: read_list("RolePlayList"),
+        });
+    }
     voices.sort_by(|a, b| a.id.cmp(&b.id));
     voices.dedup_by(|a, b| a.id == b.id);
     Ok(voices)
