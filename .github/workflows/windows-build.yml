@@ -1,4 +1,5 @@
 name: Windows build
+run-name: Portable fork build (${{ github.ref_name }})
 
 on:
   workflow_dispatch:
@@ -12,6 +13,7 @@ concurrency:
 
 jobs:
   build-windows:
+    if: github.ref == 'refs/heads/feature/tts-port-android'
     runs-on: windows-latest
     steps:
       - name: Checkout

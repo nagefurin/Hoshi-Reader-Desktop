@@ -32,7 +32,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "targets": "all",
     "icon": [
       "icons/icon.png",
@@ -46,17 +46,6 @@
     "macOS": {
       "signingIdentity": "Developer ID Application: Manh-Hao Steffen Pham (GPLBDQ2MBT)",
       "minimumSystemVersion": "15.0"
-    }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNGNDAyNDMwNUEzRUE1REIKUldUYnBUNWFNQ1JBUDJnaEt5NGhiWmp0L09ELzZnNHhtbHlzSEF5bEpFQ1dWdHRHMHRsUlk3UFkK",
-      "endpoints": [
-        "https://github.com/Manhhao/Hoshi-Reader-Desktop/releases/latest/download/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
     }
   }
 }

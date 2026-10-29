@@ -10,31 +10,11 @@
   let version = $state("");
   getVersion().then((value) => (version = value));
 
-  let update = $state<"idle" | "checking" | "current" | "installing" | "error">("idle");
-  let updateVersion = $state<string | null>(null);
 
   function openLink(url: string) {
     invoke("open_external", { url });
   }
 
-  async function checkUpdate() {
-    update = "checking";
-    try {
-      updateVersion = await invoke<string | null>("check_update");
-      update = updateVersion ? "idle" : "current";
-    } catch {
-      update = "error";
-    }
-  }
-
-  async function installUpdate() {
-    update = "installing";
-    try {
-      await invoke("install_update");
-    } catch {
-      update = "error";
-    }
-  }
 </script>
 
 <div class="card overflow-hidden border border-base-300 bg-base-100">
@@ -44,18 +24,13 @@
       <h2 class="text-2xl font-semibold">Hoshi Reader Desktop</h2>
       <p class="select-text text-sm text-base-content/60">Version {version}</p>
     </div>
-    <SettingRow label="Updates">
-      {#if updateVersion}
-        <button class="btn btn-primary btn-sm" disabled={update === "installing"} onclick={installUpdate}>{update === "installing" ? "Installing…" : `Install ${updateVersion}`}</button>
-      {:else}
-        <div class="flex items-center gap-3">
-          {#if update === "current"}<span class="text-sm text-base-content/60">Up to date</span>{/if}
-          {#if update === "error"}<span class="text-sm text-error">Update failed</span>{/if}
-          <button class="btn btn-sm" disabled={update === "checking"} onclick={checkUpdate}>{update === "checking" ? "Checking…" : "Check for Updates"}</button>
-        </div>
-      {/if}
+    <SettingRow label="Portable build">
+      <div class="flex flex-wrap items-center justify-end gap-3">
+        <span class="text-sm text-base-content/60">Download a fresh EXE to update.</span>
+        <button class="btn btn-sm" onclick={() => openLink("https://github.com/nagefurin/Hoshi-Reader-Desktop/actions/workflows/windows-build.yml")}>Open build actions</button>
+      </div>
     </SettingRow>
-    <button class="flex items-center justify-between gap-4 text-left text-sm" onclick={() => openLink("https://github.com/Manhhao/Hoshi-Reader-Desktop")}>
+    <button class="flex items-center justify-between gap-4 text-left text-sm" onclick={() => openLink("https://github.com/nagefurin/Hoshi-Reader-Desktop")}>
       <span>GitHub</span><ExternalLink class="size-4 text-base-content/60" />
     </button>
   </div>

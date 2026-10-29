@@ -17,7 +17,6 @@
   import Settings, { settingsTabs, type SettingsTab } from "./lib/Settings.svelte";
   import SourceList from "./lib/SourceList.svelte";
   import ChangelogDialog from "./lib/ChangelogDialog.svelte";
-  import UpdateDialog from "./lib/UpdateDialog.svelte";
   import AttachDialog from "./lib/AttachDialog.svelte";
   import type {
     AppView,
@@ -354,5 +353,4 @@
 {/if}
 
 <ChangelogDialog />
-<UpdateDialog />
 <AttachDialog />
