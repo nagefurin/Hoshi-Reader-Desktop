@@ -5,7 +5,7 @@
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
   import SettingToggle from "./SettingToggle.svelte";
-  import SettingStepper from "./SettingStepper.svelte";
+
 
   let { compact = false }: { compact?: boolean } = $props();
 
@@ -30,23 +30,25 @@
     bind:checked={sasayakiConfig.sasayakiAutoPause}
     onchange={saveSasayakiConfig}
   />
-  <SettingToggle
-    label="Pause on Images"
-    {compact}
-    bind:checked={sasayakiConfig.sasayakiImagePause}
-    onchange={saveSasayakiConfig}
-  />
-  {#if sasayakiConfig.sasayakiImagePause}
-    <SettingStepper
-      label="Pause Duration"
-      {compact}
-      bind:value={sasayakiConfig.sasayakiImagePauseDuration}
-      suffix="s"
-      min={1}
-      max={30}
-      onchange={saveSasayakiConfig}
-    />
-  {/if}
+  <SettingRow label="Image Hold" {compact}>
+    <div class="flex items-center gap-2">
+      <input
+        type="range"
+        class="range range-xs text-primary w-24"
+        min="0"
+        max="5"
+        step="0.5"
+        value={sasayakiConfig.sasayakiImagePause ? Math.min(5, Math.max(0, Number(sasayakiConfig.sasayakiImagePauseDuration) || 0)) : 0}
+        oninput={(event) => {
+          const seconds = Number(event.currentTarget.value);
+          sasayakiConfig.sasayakiImagePauseDuration = seconds;
+          sasayakiConfig.sasayakiImagePause = seconds > 0;
+          saveSasayakiConfig();
+        }}
+      />
+      <span class="w-10 text-right text-xs tabular-nums">{sasayakiConfig.sasayakiImagePause ? `${Number(sasayakiConfig.sasayakiImagePauseDuration).toFixed(1)}s` : "Off"}</span>
+    </div>
+  </SettingRow>
   <SettingToggle
     label="Track Statistics in Background"
     {compact}

@@ -23,6 +23,7 @@ mod search;
 mod statistics;
 mod sync;
 mod transcriber;
+mod tts;
 mod ttu_statistics;
 mod wheel;
 #[cfg(target_os = "macos")]
@@ -145,6 +146,15 @@ pub fn run() {
             transcriber::sasayaki_clear_transcript,
             transcriber::sasayaki_pause_transcription,
             transcriber::sasayaki_transcribe,
+            tts::tts_load_text,
+            tts::tts_system_voices,
+            tts::tts_edge_voices,
+            tts::tts_azure_voices,
+            tts::tts_microsoft_translator_voices,
+            tts::tts_google_cloud_voices,
+            tts::tts_custom_voices,
+            tts::tts_custom_models,
+            tts::tts_synthesize,
             #[cfg(windows)]
             media_controls::media_controls_metadata,
             #[cfg(windows)]

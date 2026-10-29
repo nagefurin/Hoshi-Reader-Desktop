@@ -49,6 +49,7 @@
   import { readerConfig } from "./readerConfig.svelte";
   import Appearance from "./Appearance.svelte";
   import SasayakiSettings from "./SasayakiSettings.svelte";
+  import TtsPanel from "./TtsPanel.svelte";
   import SettingGroup from "./SettingGroup.svelte";
   import SettingSlider from "./SettingSlider.svelte";
   import { infoColor, readerBackground, readerTextColor, resolvedScheme } from "./theme.svelte";
@@ -130,7 +131,21 @@
   let bookDeleted = false;
   let applyingBookmark = false;
   let fullscreen = $state(false);
-  let readerPanel = $state<"Chapters" | "Search" | "Highlights" | "Appearance" | "Sasayaki" | null>(null);
+  type TtsControlApi = {
+    previous: () => void;
+    next: () => void;
+    repeat: () => void;
+    togglePlayback: () => void;
+  };
+  let ttsControlApi = $state<TtsControlApi | null>(null);
+  let ttsSessionActive = $state(false);
+  let ttsPlaying = $state(false);
+
+  function registerTtsControls(api: TtsControlApi | null) {
+    ttsControlApi = api;
+  }
+
+  let readerPanel = $state<"Chapters" | "Search" | "Highlights" | "Appearance" | "Sasayaki" | "TTS" | null>(null);
   let leftPanel = $state<typeof readerPanel>(null);
   let rightPanel = $state<typeof readerPanel>(null);
   let wasPaused = $state(false);
@@ -736,9 +751,10 @@
       () => applyingBookmark,
     ))();
   const transportVisible = $derived(
-    sasayakiConfig.enableSasayaki &&
-      sasayakiConfig.sasayakiShowControlBar &&
-      (sasayaki?.hasAudio ?? false),
+    ttsSessionActive ||
+      (sasayakiConfig.enableSasayaki &&
+        sasayakiConfig.sasayakiShowControlBar &&
+        (sasayaki?.hasAudio ?? false)),
   );
 
   let statsDialog = $state<HTMLDialogElement>();
@@ -1172,6 +1188,78 @@
   }
 
   let pendingSearchHighlight: { character: number; length: number } | null = null;
+  let ttsCurrentHighlight: { chapterIndex: number; text: string } | null = null;
+  let pendingTtsPresentation: { chapterIndex: number; text: string; imagesBefore: number[] } | null = null;
+  let resolveTtsPositioned: (() => void) | null = null;
+
+  async function holdTtsImages(chapterIndex: number, text: string, images: number[]) {
+    if (!sasayakiConfig.sasayakiAutoScroll || !sasayakiConfig.sasayakiImagePause) return;
+    const holdMs = Math.max(0, Number(sasayakiConfig.sasayakiImagePauseDuration) || 0) * 1000;
+    for (const imageIndex of images) {
+      if (chapterIndex !== index || ttsCurrentHighlight?.chapterIndex !== chapterIndex ||
+          ttsCurrentHighlight.text !== text) return;
+      postToFrame({ hoshi: "tts-image", index: imageIndex });
+      if (holdMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, holdMs));
+    }
+  }
+
+  async function presentTtsSegment(presentation: { chapterIndex: number; text: string; imagesBefore: number[] }) {
+    if (presentation.chapterIndex !== index || ttsCurrentHighlight?.chapterIndex !== presentation.chapterIndex ||
+        ttsCurrentHighlight.text !== presentation.text) return;
+    await holdTtsImages(presentation.chapterIndex, presentation.text, presentation.imagesBefore);
+    if (presentation.chapterIndex !== index || ttsCurrentHighlight?.text !== presentation.text) return;
+    postToFrame({
+      hoshi: "tts-highlight",
+      text: presentation.text,
+      reveal: sasayakiConfig.sasayakiAutoScroll,
+    });
+  }
+
+  async function onTtsReadSegment(spineIndex: number, text: string, imagesBefore: number[]): Promise<void> {
+    const presentation = { chapterIndex: spineIndex, text, imagesBefore };
+    ttsCurrentHighlight = { chapterIndex: spineIndex, text };
+
+    if (!sasayakiConfig.sasayakiAutoScroll) {
+      if (spineIndex === index && !loading) postToFrame({ hoshi: "tts-highlight", text, reveal: false });
+      return;
+    }
+
+    if (spineIndex === index && !loading) {
+      await presentTtsSegment(presentation);
+      return;
+    }
+
+    pendingTtsPresentation = presentation;
+    await new Promise<void>((resolve) => {
+      resolveTtsPositioned = () => {
+        resolveTtsPositioned = null;
+        const pending = pendingTtsPresentation;
+        pendingTtsPresentation = null;
+        if (pending && pending.chapterIndex === index) {
+          void presentTtsSegment(pending).finally(resolve);
+        } else {
+          resolve();
+        }
+      };
+
+      if (spineIndex !== index) {
+        const chapter = bookInfo.chapterInfo[spine[spineIndex]];
+        const progress = continuous && chapter && bookInfo.characterCount > 0
+          ? chapter.currentTotal / bookInfo.characterCount
+          : 0;
+        navigateTo(spineIndex, progress);
+      }
+    });
+  }
+
+  function clearTtsHighlight() {
+    ttsCurrentHighlight = null;
+    pendingTtsPresentation = null;
+    const resolve = resolveTtsPositioned;
+    resolveTtsPositioned = null;
+    resolve?.();
+    postToFrame({ hoshi: "tts-clear" });
+  }
 
   function jumpToSearchResult(result: BookSearchResult) {
     pendingSearchHighlight = { character: result.character, length: result.length };
@@ -1226,7 +1314,7 @@
     readerPanel = panel;
     closePopups();
     if (panel) {
-      if (panel === "Appearance" || panel === "Sasayaki") rightPanel = panel;
+      if (panel === "Appearance" || panel === "Sasayaki" || panel === "TTS") rightPanel = panel;
       else leftPanel = panel;
       jumpToOpen = false;
       jumpToInput = "";
@@ -1320,7 +1408,7 @@
         (binding) =>
           binding.key === "toggleTracking" ||
           (binding.key === "manualBookmark" && !continuous) ||
-          (binding.section === "Sasayaki" && sasayaki?.hasAudio) ||
+          (binding.section === "Sasayaki" && (sasayaki?.hasAudio || ttsSessionActive)) ||
           (binding.section === "Popup" && popups.length > 0),
       )
       .map((binding) => hotkeyConfig[binding.key])
@@ -1343,10 +1431,19 @@
     if (key === "F11") toggleFullscreen();
     else if (key === hotkeyConfig.toggleTracking) toggleTracking();
     else if (key === hotkeyConfig.manualBookmark) postToFrame({ hoshi: "bookmark-mode" });
-    else if (key === hotkeyConfig.sasayakiPlayback) toggleSasayakiPlayback();
-    else if (key === hotkeyConfig.sasayakiPreviousCue) sasayaki?.prevCue();
-    else if (key === hotkeyConfig.sasayakiNextCue) sasayaki?.nextCue();
-    else if (key === hotkeyConfig.sasayakiRepeatCue) sasayaki?.repeatCue();
+    else if (key === hotkeyConfig.sasayakiPlayback) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.togglePlayback();
+      else toggleSasayakiPlayback();
+    } else if (key === hotkeyConfig.sasayakiPreviousCue) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.previous();
+      else sasayaki?.prevCue();
+    } else if (key === hotkeyConfig.sasayakiNextCue) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.next();
+      else sasayaki?.nextCue();
+    } else if (key === hotkeyConfig.sasayakiRepeatCue) {
+      if (ttsSessionActive && ttsControlApi) ttsControlApi.repeat();
+      else sasayaki?.repeatCue();
+    }
     else if (key === hotkeyConfig.mineEntry1) popupViews[popups.length - 1]?.entryAction("mine", 0);
     else if (key === hotkeyConfig.mineEntry2) popupViews[popups.length - 1]?.entryAction("mine", 1);
     else if (key === hotkeyConfig.mineEntry3) popupViews[popups.length - 1]?.entryAction("mine", 2);
@@ -1459,6 +1556,11 @@
           const chapter = bookInfo.chapterInfo[spine[index]];
           postToFrame({ hoshi: "search-highlight", spine: index, offset: pendingSearchHighlight.character - chapter.currentTotal, length: pendingSearchHighlight.length });
           pendingSearchHighlight = null;
+        }
+        if (resolveTtsPositioned) {
+          resolveTtsPositioned();
+        } else if (ttsCurrentHighlight?.chapterIndex === index) {
+          postToFrame({ hoshi: "tts-highlight", text: ttsCurrentHighlight.text, reveal: sasayakiConfig.sasayakiAutoScroll });
         }
         sasayaki?.handleRestoreCompleted(index);
         if (pageAdvance) postToFrame({ hoshi: "page-cues", play: pendingPagePlayback });
@@ -1814,6 +1916,15 @@
           </button>
         {/if}
         <button
+          class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS'
+            ? 'btn-active text-primary'
+            : 'text-base-content/60'}"
+          title="TTS"
+          onclick={() => openReaderPanel(readerPanel === "TTS" ? null : "TTS")}
+        >
+          <Volume2 class="size-4" />
+        </button>
+        <button
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'Appearance'
             ? 'btn-active text-primary'
             : 'text-base-content/60'}"
@@ -1982,6 +2093,31 @@
       </div>
     {/snippet}
 
+    {#snippet ttsTransport()}
+      <div
+        class="absolute bottom-0 left-1/2 z-20 flex w-max max-w-full -translate-x-1/2 items-center justify-center gap-1 py-1.5 text-xs opacity-55 transition-opacity duration-200 hover:opacity-100"
+        style={readerInfo ? `color: ${readerInfo}` : ""}
+      >
+        <div class="flex items-center gap-1 {vertical ? '-scale-x-100' : ''}">
+          {@render transportButton(RotateCcw, () => ttsControlApi?.repeat())}
+          {@render transportButton(Rewind, () => ttsControlApi?.previous())}
+          <button
+            class="flex size-5 items-center justify-center rounded hover:bg-current/10 {vertical ? '-scale-x-100' : ''}"
+            title={ttsPlaying ? "Pause TTS" : "Play TTS"}
+            onclick={() => ttsControlApi?.togglePlayback()}
+          >
+            {#if ttsPlaying}
+              <Pause class="size-3.5" fill="currentColor" />
+            {:else}
+              <Play class="size-3.5" fill="currentColor" />
+            {/if}
+          </button>
+          {@render transportButton(FastForward, () => ttsControlApi?.next())}
+        </div>
+        <span class="ml-1 whitespace-nowrap text-[10px] font-medium">TTS</span>
+      </div>
+    {/snippet}
+
     {#snippet transport(player: SasayakiPlayer)}
       {@const percent = player.duration ? (player.currentTime / player.duration) * 100 : 0}
       <div
@@ -2059,7 +2195,9 @@
       </div>
     {/if}
 
-    {#if transportVisible && sasayaki}
+    {#if ttsSessionActive && ttsControlApi}
+      {@render ttsTransport()}
+    {:else if transportVisible && sasayaki}
       {@render transport(sasayaki)}
     {/if}
 
@@ -2305,6 +2443,26 @@
       {#if side === "left"}
         <div class="min-h-0 flex-1 flex-col {panel === 'Search' ? 'flex' : 'hidden'}">
           <BookSearch {id} {positionLabel} onJump={jumpToSearchResult} bind:this={bookSearch} />
+        </div>
+      {/if}
+
+      {#if side === "right"}
+        <div class="min-h-0 flex-1 flex-col {panel === 'TTS' ? 'flex' : 'hidden'}">
+          <TtsPanel
+            {id}
+            {title}
+            currentChapterIndex={index}
+            currentCharacterCount={currentChar}
+            currentChapterCharacterStart={bookInfo.chapterInfo[spine[index]]?.currentTotal ?? 0}
+            lookupActive={popups.length > 0}
+            continuousMode={continuous}
+            bind:sessionActive={ttsSessionActive}
+            bind:playing={ttsPlaying}
+            onControlApi={registerTtsControls}
+            onReadSegment={onTtsReadSegment}
+            onHoldImages={holdTtsImages}
+            onClearHighlight={clearTtsHighlight}
+          />
         </div>
       {/if}
 

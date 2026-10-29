@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build-windows:
-    if: github.ref == 'refs/heads/portable-settings' || github.head_ref == 'portable-settings'
+    if: github.ref == 'refs/heads/portable-settings' || github.ref == 'refs/heads/Text-to-speech' || github.head_ref == 'portable-settings' || github.head_ref == 'Text-to-speech'
     runs-on: windows-latest
     steps:
       - name: Checkout

@@ -92,7 +92,7 @@ pub fn open_book(
     Ok(document)
 }
 
-fn book_document(epub: &Epub) -> BookDocument {
+pub(crate) fn book_document(epub: &Epub) -> BookDocument {
     let title = epub
         .metadata()
         .title()
