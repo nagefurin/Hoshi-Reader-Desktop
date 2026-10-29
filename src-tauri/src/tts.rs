@@ -39,6 +39,70 @@ pub struct TtsChapter {
     pub image_index_start: usize,
 }
 
+pub struct TtsVoiceInfo {
+    pub id: String,
+    pub styles: Vec<String>,
+    pub roles: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TtsSynthesisOptions {
+    pub volume: f32,
+    pub style: String,
+    pub style_degree: f32,
+    pub role: String,
+    pub leading_ms: i32,
+    pub trailing_ms: i32,
+    pub comma_ms: i32,
+    pub semicolon_ms: i32,
+    pub enumeration_comma_ms: i32,
+    pub sentence_boundary_ms: i32,
+    pub format: String,
+    pub sample_rate: u32,
+    pub effects_profile: String,
+}
+
+impl Default for TtsSynthesisOptions {
+    fn default() -> Self {
+        Self {
+            volume: 0.0,
+            style: String::new(),
+            style_degree: 1.0,
+            role: String::new(),
+            leading_ms: -1,
+            trailing_ms: -1,
+            comma_ms: -1,
+            semicolon_ms: -1,
+            enumeration_comma_ms: -1,
+            sentence_boundary_ms: -1,
+            format: "mp3".to_string(),
+            sample_rate: 24000,
+            effects_profile: String::new(),
+        }
+    }
+}
+
+impl TtsSynthesisOptions {
+    fn sample_rate(&self) -> u32 {
+        if [16000, 24000, 48000].contains(&self.sample_rate) { self.sample_rate } else { 24000 }
+    }
+
+    fn is_wav(&self) -> bool {
+        self.format.eq_ignore_ascii_case("wav")
+    }
+
+    fn volume(&self, google_cloud: bool) -> f32 {
+        if !self.volume.is_finite() { 0.0 }
+        else if google_cloud { self.volume.clamp(-96.0, 16.0) }
+        else { self.volume.clamp(-100.0, 100.0) }
+    }
+
+    fn pause_ms(value: i32) -> Option<u32> {
+        (value >= 0).then_some(value.clamp(0, 1000) as u32)
+    }
+}
+
 static RE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)</?(?:p|div|h[1-6]|li|ul|ol|blockquote|section|article|table|tr|td|th|br|hr|figure|figcaption)\b[^>]*>").unwrap()
 });
@@ -255,6 +319,10 @@ struct EdgeVoice {
     locale: String,
     #[serde(rename = "ShortName")]
     short_name: String,
+    #[serde(rename = "StyleList", default)]
+    styles: Vec<String>,
+    #[serde(rename = "RolePlayList", default)]
+    roles: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -267,18 +335,22 @@ struct MicrosoftTranslatorToken {
 static MICROSOFT_TRANSLATOR_TOKEN: LazyLock<Mutex<Option<MicrosoftTranslatorToken>>> =
     LazyLock::new(|| Mutex::new(None));
 
-fn japanese_microsoft_voices(bytes: &[u8], provider: &str) -> Result<Vec<String>, String> {
+fn japanese_microsoft_voices(bytes: &[u8], provider: &str) -> Result<Vec<TtsVoiceInfo>, String> {
     let values: Vec<EdgeVoice> = serde_json::from_slice(bytes).map_err(|error| {
         let preview = String::from_utf8_lossy(bytes).chars().take(240).collect::<String>();
         format!("{provider} returned an invalid voice list: {error}. Response: {preview}")
     })?;
-    let mut voices: Vec<String> = values.into_iter()
+    let mut voices: Vec<TtsVoiceInfo> = values.into_iter()
         .filter(|voice| voice.locale.eq_ignore_ascii_case("ja-JP"))
-        .map(|voice| voice.short_name)
-        .filter(|voice| !voice.trim().is_empty())
+        .filter(|voice| !voice.short_name.trim().is_empty())
+        .map(|voice| TtsVoiceInfo {
+            id: voice.short_name,
+            styles: voice.styles,
+            roles: voice.roles,
+        })
         .collect();
-    voices.sort();
-    voices.dedup();
+    voices.sort_by(|a, b| a.id.cmp(&b.id));
+    voices.dedup_by(|a, b| a.id == b.id);
     Ok(voices)
 }
 
@@ -291,7 +363,7 @@ fn azure_base(region: &str) -> Result<Url, String> {
         .map_err(|_| "Could not prepare the Azure Speech endpoint.".to_string())
 }
 
-async fn tts_azure_voice_list(region: &str, api_key: &str) -> Result<Vec<String>, String> {
+async fn tts_azure_voice_list(region: &str, api_key: &str) -> Result<Vec<TtsVoiceInfo>, String> {
     if api_key.trim().is_empty() {
         return Err("Enter an Azure Speech subscription key first.".to_string());
     }
@@ -315,7 +387,7 @@ async fn tts_azure_voice_list(region: &str, api_key: &str) -> Result<Vec<String>
     japanese_microsoft_voices(&bytes, "Azure Speech")
 }
 
-async fn tts_google_cloud_voice_list(api_key: &str) -> Result<Vec<String>, String> {
+async fn tts_google_cloud_voice_list(api_key: &str) -> Result<Vec<TtsVoiceInfo>, String> {
     if api_key.trim().is_empty() {
         return Err("Enter a Google Cloud Text-to-Speech API key first.".to_string());
     }
@@ -337,14 +409,18 @@ async fn tts_google_cloud_voice_list(api_key: &str) -> Result<Vec<String>, Strin
     }
     let data: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("Google Cloud returned an invalid voice list: {error}"))?;
-    let mut voices: Vec<String> = data.get("voices").and_then(Value::as_array).into_iter().flatten()
+    let mut voices: Vec<TtsVoiceInfo> = data.get("voices").and_then(Value::as_array).into_iter().flatten()
         .filter(|voice| voice.get("languageCodes").and_then(Value::as_array).is_some_and(|languages| {
             languages.iter().any(|language| language.as_str() == Some("ja-JP"))
         }))
-        .filter_map(|voice| voice.get("name").and_then(Value::as_str).map(str::to_string))
+        .filter_map(|voice| voice.get("name").and_then(Value::as_str).map(|id| TtsVoiceInfo {
+            id: id.to_string(),
+            styles: Vec::new(),
+            roles: Vec::new(),
+        }))
         .collect();
-    voices.sort();
-    voices.dedup();
+    voices.sort_by(|a, b| a.id.cmp(&b.id));
+    voices.dedup_by(|a, b| a.id == b.id);
     Ok(voices)
 }
 
@@ -435,7 +511,7 @@ async fn microsoft_translator_token(client: &Client) -> Result<MicrosoftTranslat
     Ok(token)
 }
 
-async fn tts_translator_voice_list() -> Result<Vec<String>, String> {
+async fn tts_translator_voice_list() -> Result<Vec<TtsVoiceInfo>, String> {
     let client = request_client()?;
     let token = microsoft_translator_token(&client).await?;
     let mut url = azure_base(&token.region)?;
@@ -798,22 +874,22 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32) -> 
 }
 
 #[tauri::command]
-pub async fn tts_edge_voices() -> Result<Vec<String>, String> {
+pub async fn tts_edge_voices() -> Result<Vec<TtsVoiceInfo>, String> {
     tts_edge_voice_list().await
 }
 
 #[tauri::command]
-pub async fn tts_azure_voices(region: String, api_key: String) -> Result<Vec<String>, String> {
+pub async fn tts_azure_voices(region: String, api_key: String) -> Result<Vec<TtsVoiceInfo>, String> {
     tts_azure_voice_list(&region, &api_key).await
 }
 
 #[tauri::command]
-pub async fn tts_microsoft_translator_voices() -> Result<Vec<String>, String> {
+pub async fn tts_microsoft_translator_voices() -> Result<Vec<TtsVoiceInfo>, String> {
     tts_translator_voice_list().await
 }
 
 #[tauri::command]
-pub async fn tts_google_cloud_voices(api_key: String) -> Result<Vec<String>, String> {
+pub async fn tts_google_cloud_voices(api_key: String) -> Result<Vec<TtsVoiceInfo>, String> {
     tts_google_cloud_voice_list(&api_key).await
 }
 
