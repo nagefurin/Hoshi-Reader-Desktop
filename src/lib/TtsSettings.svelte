@@ -236,7 +236,6 @@
       <option value="microsoftTranslator">Microsoft Translator</option>
       <option value="googleCloud">Google Cloud Text-to-Speech</option>
       <option value="googleTranslate">Google Translate (online)</option>
-      <option value="openAi">OpenAI-compatible / custom endpoint</option>
     </select>
   </SettingRow>
 
@@ -351,31 +350,6 @@
     {#if googleCloudVoiceError}<p class="text-xs text-error">{googleCloudVoiceError}</p>{/if}
   {:else if ttsConfig.engine === "googleTranslate"}
     <p class="text-xs text-base-content/60">Google Translate uses its default Japanese voice. It has no voice selector or API key.</p>
-  {:else if ttsConfig.engine === "openAi"}
-    <SettingRow compact={compact} label="Base URL">
-      <input
-        class="input input-sm w-full max-w-lg"
-        type="url"
-        placeholder={ttsConfig.engine === "openAi" ? "https://api.openai.com/v1" : "http://127.0.0.1:5000"}
-        bind:value={ttsConfig.endpoint}
-        onchange={save}
-      />
-    </SettingRow>
-    <SettingRow compact={compact} label="API Key">
-      <input class="input input-sm w-full max-w-lg" type="password" autocomplete="off" bind:value={ttsRuntime.apiKey} placeholder="Optional; held in memory only" />
-    </SettingRow>
-    {#if ttsConfig.engine === "openAi"}
-      <SettingRow compact={compact} label="Model">
-        <input class="input input-sm w-52" bind:value={ttsConfig.model} onchange={save} placeholder="tts-1" />
-      </SettingRow>
-      <SettingRow compact={compact} label="Narration Voice">
-        <input class="input input-sm w-52" bind:value={ttsConfig.remoteVoice} onchange={save} placeholder="alloy" />
-      </SettingRow>
-      <SettingRow compact={compact} label="Dialogue Voice">
-        <input class="input input-sm w-52" bind:value={ttsConfig.remoteDialogueVoice} onchange={save} placeholder="Same as narration" />
-      </SettingRow>
-    {/if}
-    <p class="text-xs text-base-content/60">Generated speech text is sent to the configured service. HTTPS is required for remote hosts; HTTP is allowed only for localhost or private-network hosts. API keys are not saved to disk and are cleared when the app restarts.</p>
   {/if}
 </SettingsSection>
 
@@ -461,7 +435,7 @@
       {/each}
     {/if}
 
-    {#if ["azure", "microsoftTranslator", "googleCloud", "openAi"].includes(ttsConfig.engine)}
+    {#if ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)}
       <SettingRow compact={compact} label="Output Format">
         <select class="select select-sm w-36" value={currentOptions().format} onchange={(event) => updateOptions({ format: event.currentTarget.value as "mp3" | "wav" })}>
           <option value="mp3">MP3</option>
