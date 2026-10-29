@@ -62,7 +62,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 windows = { version = "0.61", features = [
+    "Foundation",
+    "Foundation_Collections",
     "Media",
+    "Media_SpeechSynthesis",
     "Storage_Streams",
     "Win32_Media_MediaFoundation",
     "Win32_System_Com",
