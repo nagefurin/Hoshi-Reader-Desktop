@@ -1,6 +1,6 @@
 import { persisted } from "./persisted.svelte";
 
-export type TtsEngine = "device" | "edge" | "googleTranslate" | "azure" | "microsoftTranslator" | "googleCloud" | "openAi";
+export type TtsEngine = "device" | "edge" | "googleTranslate" | "azure" | "microsoftTranslator" | "googleCloud";
 export type TtsReplacement = {
   id: string;
   pattern: string;
@@ -47,7 +47,6 @@ const providerOptions = () => ({
   microsoftTranslator: { ...defaultSynthesisOptions },
   googleCloud: { ...defaultSynthesisOptions },
   googleTranslate: { ...defaultSynthesisOptions },
-  openAi: { ...defaultSynthesisOptions },
 });
 
 export type TtsConfig = {
@@ -62,12 +61,8 @@ export type TtsConfig = {
   prefetchSentences: number;
   pitch: number;
   volume: number;
-  endpoint: string;
-  model: string;
-  remoteVoice: string;
   edgeVoice: string;
   edgeDialogueVoice: string;
-  remoteDialogueVoice: string;
   azureRegion: string;
   azureVoice: string;
   azureDialogueVoice: string;
@@ -91,12 +86,8 @@ const defaults: TtsConfig = {
   prefetchSentences: 5,
   pitch: 1,
   volume: 1,
-  endpoint: "",
-  model: "tts-1",
-  remoteVoice: "alloy",
   edgeVoice: "ja-JP-NanamiNeural",
   edgeDialogueVoice: "",
-  remoteDialogueVoice: "",
   azureRegion: "japaneast",
   azureVoice: "ja-JP-NanamiNeural",
   azureDialogueVoice: "",
@@ -113,4 +104,4 @@ export const ttsConfig = store.config;
 export const saveTtsConfig = store.save;
 
 // Secrets are deliberately kept out of persisted settings and cleared when the app is restarted.
-export const ttsRuntime = $state({ apiKey: "", azureKey: "", googleCloudKey: "" });
+export const ttsRuntime = $state({ azureKey: "", googleCloudKey: "" });
