@@ -4,7 +4,6 @@
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
   import SettingToggle from "./SettingToggle.svelte";
-  import SettingStepper from "./SettingStepper.svelte";
   import { sasayakiConfig, saveSasayakiConfig } from "./sasayakiConfig.svelte";
 
   let { compact = false }: { compact?: boolean } = $props();
