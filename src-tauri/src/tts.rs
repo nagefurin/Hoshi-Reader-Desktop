@@ -32,6 +32,8 @@ pub struct TtsChapter {
     pub spine_index: usize,
     pub title: String,
     pub text: String,
+    pub ruby_text: String,
+    pub image_offsets: Vec<usize>,
 }
 
 static RE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
@@ -42,6 +44,9 @@ static RE_RUBY_READING: LazyLock<Regex> = LazyLock::new(|| {
 });
 static RE_NUMERIC_ENTITY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"&#(x[0-9a-fA-F]+|[0-9]+);").unwrap());
+static RE_IMAGE_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<(?:img|image)\\b[^>]*>").unwrap());
+const IMAGE_MARKER: char = '\\u{E000}';
 
 fn decode_entities(value: &str) -> String {
     let decoded = RE_NUMERIC_ENTITY.replace_all(value, |captures: &Captures<'_>| {
@@ -79,6 +84,32 @@ fn speakable_text(html: &str, use_ruby_readings: bool) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn speakable_text_with_images(html: &str) -> (String, Vec<usize>) {
+    let body = library::body(html);
+    let marked = RE_IMAGE_TAG.replace_all(body, IMAGE_MARKER.to_string());
+    let with_breaks = RE_BLOCK.replace_all(&marked, "\\n");
+    let decoded = decode_entities(&with_breaks);
+    let plain = library::strip(&decoded);
+    let formatted = plain
+        .split('\\n')
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\\n\\n");
+    let mut text = String::with_capacity(formatted.len());
+    let mut image_offsets = Vec::new();
+    let mut character_count = 0usize;
+    for character in formatted.chars() {
+        if character == IMAGE_MARKER {
+            image_offsets.push(character_count);
+        } else {
+            text.push(character);
+            character_count += 1;
+        }
+    }
+    (text, image_offsets)
 }
 
 fn local_or_private_host(host: &str) -> bool {
@@ -160,7 +191,7 @@ async fn finish_audio(response: reqwest::Response) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn tts_load_text(app: AppHandle, id: String, use_ruby_readings: bool) -> Result<Vec<TtsChapter>, String> {
+pub async fn tts_load_text(app: AppHandle, id: String, _use_ruby_readings: bool) -> Result<Vec<TtsChapter>, String> {
     let path = library::book_epub_path(&app, &id).ok_or_else(|| format!("Book {id} was not found"))?;
     let epub = Epub::open(path).map_err(|error| error.to_string())?;
     let document = book::book_document(&epub);
@@ -180,7 +211,8 @@ pub async fn tts_load_text(app: AppHandle, id: String, use_ruby_readings: bool) 
         let Ok(content) = item.read_str() else {
             continue;
         };
-        let text = speakable_text(&content, use_ruby_readings);
+        let (text, image_offsets) = speakable_text_with_images(&content);
+        let ruby_text = speakable_text(&content, true);
         if text.trim().is_empty() {
             continue;
         }
@@ -192,7 +224,7 @@ pub async fn tts_load_text(app: AppHandle, id: String, use_ruby_readings: bool) 
             .filter(|label| !label.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| format!("Chapter {}", spine_index + 1));
-        chapters.push(TtsChapter { spine_index, title, text });
+        chapters.push(TtsChapter { spine_index, title, text, ruby_text, image_offsets });
     }
 
     if chapters.is_empty() {
