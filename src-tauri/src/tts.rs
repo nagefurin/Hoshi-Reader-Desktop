@@ -4,8 +4,10 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE, URL_SAFE_NO_PAD};
 use chrono::{Datelike, Timelike, Utc};
 use futures_util::{SinkExt, StreamExt};
+use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use tokio_tungstenite::{
     connect_async,
@@ -21,8 +23,9 @@ use rbook::Epub;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::AppHandle;
+use tokio::sync::Mutex;
 
 use crate::{book, library};
 
@@ -247,6 +250,285 @@ struct EdgeVoice {
     locale: String,
     #[serde(rename = "ShortName")]
     short_name: String,
+}
+
+#[derive(Clone)]
+struct MicrosoftTranslatorToken {
+    region: String,
+    bearer: String,
+    expires_at: u64,
+}
+
+static MICROSOFT_TRANSLATOR_TOKEN: LazyLock<Mutex<Option<MicrosoftTranslatorToken>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn japanese_microsoft_voices(bytes: &[u8], provider: &str) -> Result<Vec<String>, String> {
+    let values: Vec<EdgeVoice> = serde_json::from_slice(bytes).map_err(|error| {
+        let preview = String::from_utf8_lossy(bytes).chars().take(240).collect::<String>();
+        format!("{provider} returned an invalid voice list: {error}. Response: {preview}")
+    })?;
+    let mut voices: Vec<String> = values.into_iter()
+        .filter(|voice| voice.locale.eq_ignore_ascii_case("ja-JP"))
+        .map(|voice| voice.short_name)
+        .filter(|voice| !voice.trim().is_empty())
+        .collect();
+    voices.sort();
+    voices.dedup();
+    Ok(voices)
+}
+
+fn azure_base(region: &str) -> Result<Url, String> {
+    let region = region.trim().to_ascii_lowercase();
+    if !Regex::new(r"^[a-z][a-z0-9]{1,39}$").unwrap().is_match(&region) {
+        return Err("Enter a valid Azure Speech region, such as japaneast.".to_string());
+    }
+    Url::parse(&format!("https://{region}.tts.speech.microsoft.com"))
+        .map_err(|_| "Could not prepare the Azure Speech endpoint.".to_string())
+}
+
+async fn tts_azure_voice_list(region: &str, api_key: &str) -> Result<Vec<String>, String> {
+    if api_key.trim().is_empty() {
+        return Err("Enter an Azure Speech subscription key first.".to_string());
+    }
+    let client = request_client()?;
+    let mut url = azure_base(region)?;
+    url.set_path("/cognitiveservices/voices/list");
+    let response = client.get(url)
+        .header("Ocp-Apim-Subscription-Key", api_key.trim())
+        .header(reqwest::header::USER_AGENT, "Hoshi Reader Desktop")
+        .send().await
+        .map_err(|error| format!("Could not connect to Azure Speech: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default().chars().take(240).collect::<String>();
+        return Err(format!("Azure Speech voice list returned HTTP {status}: {detail}"));
+    }
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read Azure Speech voices: {error}"))?;
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err("Azure Speech voice list response was unexpectedly large.".to_string());
+    }
+    japanese_microsoft_voices(&bytes, "Azure Speech")
+}
+
+async fn tts_google_cloud_voice_list(api_key: &str) -> Result<Vec<String>, String> {
+    if api_key.trim().is_empty() {
+        return Err("Enter a Google Cloud Text-to-Speech API key first.".to_string());
+    }
+    let client = request_client()?;
+    let mut url = Url::parse("https://texttospeech.googleapis.com/v1/voices").unwrap();
+    url.query_pairs_mut().append_pair("languageCode", "ja-JP");
+    let response = client.get(url)
+        .header("X-Goog-Api-Key", api_key.trim())
+        .send().await
+        .map_err(|error| format!("Could not connect to Google Cloud Text-to-Speech: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default().chars().take(240).collect::<String>();
+        return Err(format!("Google Cloud voice list returned HTTP {status}: {detail}"));
+    }
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read Google Cloud voices: {error}"))?;
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err("Google Cloud voice list response was unexpectedly large.".to_string());
+    }
+    let data: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Google Cloud returned an invalid voice list: {error}"))?;
+    let mut voices: Vec<String> = data.get("voices").and_then(Value::as_array).into_iter().flatten()
+        .filter(|voice| voice.get("languageCodes").and_then(Value::as_array).is_some_and(|languages| {
+            languages.iter().any(|language| language.as_str() == Some("ja-JP"))
+        }))
+        .filter_map(|voice| voice.get("name").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    voices.sort();
+    voices.dedup();
+    Ok(voices)
+}
+
+fn microsoft_translator_signature(unix_seconds: u64, nonce: &str) -> Result<String, String> {
+    const APPLICATION: &str = "MSTranslatorAndroidApp";
+    const SIGNING_KEY: &str = "oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw==";
+    const ENDPOINT: &str = "https://dev.microsofttranslator.com/apps/endpoint?api-version=1.0";
+    let date = chrono::DateTime::<Utc>::from_timestamp(unix_seconds as i64, 0)
+        .ok_or_else(|| "System time is invalid for Microsoft Translator.".to_string())?
+        .format("%a, %d %b %Y %H:%M:%S GMT")
+        .to_string()
+        .to_ascii_lowercase();
+    let encoded_url = urlencoding::encode(ENDPOINT.trim_start_matches("https://")).into_owned();
+    let input = format!("{APPLICATION}{encoded_url}{date}{nonce}").to_ascii_lowercase();
+    let key = STANDARD.decode(SIGNING_KEY)
+        .map_err(|_| "Could not initialize Microsoft Translator authorization.".to_string())?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(&key)
+        .map_err(|_| "Could not initialize Microsoft Translator authorization.".to_string())?;
+    mac.update(input.as_bytes());
+    let signature = STANDARD.encode(mac.finalize().into_bytes());
+    Ok(format!("{APPLICATION}::{signature}::{date}::{nonce}"))
+}
+
+async fn microsoft_translator_token(client: &Client) -> Result<MicrosoftTranslatorToken, String> {
+    const ENDPOINT: &str = "https://dev.microsofttranslator.com/apps/endpoint?api-version=1.0";
+    let mut cached = MICROSOFT_TRANSLATOR_TOKEN.lock().await;
+    let now = Utc::now().timestamp().max(0) as u64;
+    if let Some(token) = cached.as_ref().filter(|token| token.expires_at > now + 60) {
+        return Ok(token.clone());
+    }
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let signature = microsoft_translator_signature(now, &nonce)?;
+    let response = client.post(ENDPOINT)
+        .header("X-ClientVersion", "4.0.530a 5fe1dc6c")
+        .header("X-UserId", &uuid::Uuid::new_v4().simple().to_string()[..16])
+        .header("X-ClientTraceId", uuid::Uuid::new_v4().to_string())
+        .header("X-MT-Signature", signature)
+        .header("Accept-Language", "ja-JP")
+        .body(Vec::new())
+        .send().await
+        .map_err(|error| format!("Could not obtain Microsoft Translator authorization: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default().chars().take(240).collect::<String>();
+        return Err(format!("Microsoft Translator authorization returned HTTP {status}: {detail}"));
+    }
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read Microsoft Translator authorization: {error}"))?;
+    let data: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Microsoft Translator returned invalid authorization data: {error}"))?;
+    let region = data.get("r").and_then(Value::as_str)
+        .ok_or_else(|| "Microsoft Translator authorization did not include a region.".to_string())?
+        .to_string();
+    azure_base(&region)?;
+    let bearer = data.get("t").and_then(Value::as_str)
+        .ok_or_else(|| "Microsoft Translator authorization did not include a token.".to_string())?
+        .to_string();
+    if bearer.len() > 16_384 || bearer.chars().any(|character| character <= ' ' || !character.is_ascii()) {
+        return Err("Microsoft Translator returned an invalid bearer token.".to_string());
+    }
+    let claims = bearer.split('.').nth(1)
+        .ok_or_else(|| "Microsoft Translator returned a malformed bearer token.".to_string())?;
+    let payload = URL_SAFE_NO_PAD.decode(claims).or_else(|_| URL_SAFE.decode(claims))
+        .map_err(|_| "Microsoft Translator returned a malformed bearer token.".to_string())?;
+    let claims: Value = serde_json::from_slice(&payload)
+        .map_err(|_| "Microsoft Translator returned invalid token claims.".to_string())?;
+    let expires_at = claims.get("exp").and_then(Value::as_u64)
+        .ok_or_else(|| "Microsoft Translator token did not contain an expiration time.".to_string())?;
+    if expires_at <= now {
+        return Err("Microsoft Translator returned an expired token.".to_string());
+    }
+    let token = MicrosoftTranslatorToken { region, bearer, expires_at };
+    *cached = Some(token.clone());
+    Ok(token)
+}
+
+async fn tts_translator_voice_list() -> Result<Vec<String>, String> {
+    let client = request_client()?;
+    let token = microsoft_translator_token(&client).await?;
+    let mut url = azure_base(&token.region)?;
+    url.set_path("/cognitiveservices/voices/list");
+    let response = client.get(url)
+        .bearer_auth(&token.bearer)
+        .header(reqwest::header::USER_AGENT, "Hoshi Reader Desktop")
+        .send().await
+        .map_err(|error| format!("Could not connect to Microsoft Translator voices: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default().chars().take(240).collect::<String>();
+        return Err(format!("Microsoft Translator voice list returned HTTP {status}: {detail}"));
+    }
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read Microsoft Translator voices: {error}"))?;
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err("Microsoft Translator voice list response was unexpectedly large.".to_string());
+    }
+    japanese_microsoft_voices(&bytes, "Microsoft Translator")
+}
+
+fn azure_ssml(text: &str, voice: &str, rate: f32, pitch: f32) -> String {
+    let rate_percent = ((rate.clamp(0.5, 2.0) - 1.0) * 100.0).round() as i32;
+    let pitch = pitch.clamp(-12.0, 7.0).round() as i32;
+    format!(
+        "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"ja-JP\"><voice name=\"{}\"><prosody rate=\"{:+}%\" pitch=\"{:+}st\" volume=\"+0%\">{}</prosody></voice></speak>",
+        edge_xml(voice), rate_percent, pitch, edge_xml(text)
+    )
+}
+
+async fn tts_azure_synthesize(
+    client: &Client, region: &str, api_key: &str, text: &str, voice: &str, rate: f32, pitch: f32,
+) -> Result<String, String> {
+    if api_key.trim().is_empty() {
+        return Err("Enter an Azure Speech subscription key first.".to_string());
+    }
+    let mut url = azure_base(region)?;
+    url.set_path("/cognitiveservices/v1");
+    let response = client.post(url)
+        .header("Ocp-Apim-Subscription-Key", api_key.trim())
+        .header("X-Microsoft-OutputFormat", "audio-24khz-96kbitrate-mono-mp3")
+        .header("User-Agent", "Hoshi Reader Desktop")
+        .header(CONTENT_TYPE, "application/ssml+xml")
+        .body(azure_ssml(text, voice, rate, pitch))
+        .send().await
+        .map_err(|error| format!("Could not connect to Azure Speech: {error}"))?;
+    finish_audio(response).await
+}
+
+async fn tts_google_cloud_synthesize(
+    client: &Client, api_key: &str, text: &str, voice: &str, rate: f32, pitch: f32,
+) -> Result<String, String> {
+    if api_key.trim().is_empty() {
+        return Err("Enter a Google Cloud Text-to-Speech API key first.".to_string());
+    }
+    let voice = if voice.trim().is_empty() { "ja-JP-Neural2-B" } else { voice.trim() };
+    let response = client.post("https://texttospeech.googleapis.com/v1/text:synthesize")
+        .header("X-Goog-Api-Key", api_key.trim())
+        .json(&json!({
+            "input": { "text": text },
+            "voice": { "languageCode": "ja-JP", "name": voice },
+            "audioConfig": {
+                "audioEncoding": "MP3",
+                "speakingRate": rate.clamp(0.25, 2.0),
+                "sampleRateHertz": 24000,
+                "pitch": pitch.clamp(-20.0, 20.0),
+                "volumeGainDb": 0.0
+            }
+        }))
+        .send().await
+        .map_err(|error| format!("Could not connect to Google Cloud Text-to-Speech: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default().chars().take(300).collect::<String>();
+        return Err(format!("Google Cloud synthesis returned HTTP {status}: {detail}"));
+    }
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read Google Cloud audio response: {error}"))?;
+    if bytes.len() > EDGE_MAX_AUDIO_BYTES {
+        return Err("Google Cloud audio exceeds the 16 MB safety limit.".to_string());
+    }
+    let data: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Google Cloud returned invalid synthesis data: {error}"))?;
+    let encoded = data.get("audioContent").and_then(Value::as_str)
+        .ok_or_else(|| "Google Cloud returned no audioContent.".to_string())?;
+    let audio = STANDARD.decode(encoded)
+        .map_err(|_| "Google Cloud returned invalid base64 audio.".to_string())?;
+    if audio.is_empty() {
+        return Err("Google Cloud returned empty audio.".to_string());
+    }
+    Ok(STANDARD.encode(audio))
+}
+
+fn google_translate_body(text: &str, slow: bool) -> String {
+    let params = json!([text, "ja", if slow { Value::Bool(true) } else { Value::Null }, "null"]).to_string();
+    json!([[["jQ1olc", params, Value::Null, "generic"]]]).to_string()
+}
+
+fn google_translate_audio(response: &str) -> Result<Vec<u8>, String> {
+    for line in response.lines().filter(|line| line.trim_start().starts_with('[')) {
+        let Ok(rows) = serde_json::from_str::<Value>(line) else { continue };
+        let Some(rows) = rows.as_array() else { continue };
+        for row in rows {
+            let Some(values) = row.as_array() else { continue };
+            if values.get(1).and_then(Value::as_str) != Some("jQ1olc") { continue; }
+            let Some(payload) = values.get(2).and_then(Value::as_str) else { continue };
+            let parsed: Value = serde_json::from_str(payload)
+                .map_err(|_| "Google Translate returned invalid audio data.".to_string())?;
+            let audio = parsed.get(0).and_then(Value::as_str)
+                .ok_or_else(|| "Google Translate returned no audio data.".to_string())?;
+            return STANDARD.decode(audio).map_err(|_| "Google Translate returned invalid base64 audio.".to_string());
+        }
+    }
+    Err("Google Translate returned an invalid audio response.".to_string())
 }
 
 fn hex_upper(bytes: &[u8]) -> String {
