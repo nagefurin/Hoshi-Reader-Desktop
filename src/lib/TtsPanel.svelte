@@ -388,6 +388,7 @@
         onClearHighlight();
       };
       currentAudio = audio;
+      prefetchAhead(segmentIndex);
       if (!paused) await audio.play();
     } catch (error) {
       if (token === runId) {
