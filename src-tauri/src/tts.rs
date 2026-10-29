@@ -146,7 +146,8 @@ fn speakable_text(html: &str, use_ruby_readings: bool) -> String {
             let ruby_markup = &captures[0];
             let readings = RE_RUBY_RT.captures_iter(ruby_markup)
                 .map(|capture| library::strip(&capture[1]))
-                .collect::<String>();
+                .collect::<Vec<_>>()
+                .join("");
             if readings.trim().is_empty() {
                 library::strip(ruby_markup)
             } else {
