@@ -9,6 +9,8 @@
     spineIndex: number;
     title: string;
     text: string;
+    rubyText: string;
+    imageOffsets: number[];
   };
 
   type SpokenSegment = {
@@ -16,6 +18,7 @@
     chapterTitle: string;
     text: string;
     sourceText: string;
+    imagesBefore: number[];
     dialogue: boolean;
   };
 
@@ -29,7 +32,7 @@
     id: string;
     title: string;
     currentChapterIndex: number;
-    onReadSegment: (spineIndex: number, sourceText: string) => void;
+    onReadSegment: (spineIndex: number, sourceText: string, imagesBefore: number[]) => Promise<void>;
     onClearHighlight: () => void;
   } = $props();
 
@@ -67,7 +70,7 @@
   }
 
   function splitQuoted(sentence: string): { text: string; dialogue: boolean }[] {
-    if (!ttsConfig.splitDialogue || ttsConfig.engine !== "device") return [{ text: sentence, dialogue: false }];
+    if (!ttsConfig.splitDialogue) return [{ text: sentence, dialogue: false }];
     const expression = /[「『][^」』]*[」』]|“[^”]*”|"[^"]*"/gu;
     const result: { text: string; dialogue: boolean }[] = [];
     let cursor = 0;
@@ -103,22 +106,57 @@
     const result: SpokenSegment[] = [];
     for (const chapter of values) {
       if (chapter.spineIndex < startIndex) continue;
-      const prepared = chapter.text;
-      for (const paragraph of prepared.split(/\n+/u)) {
-        // Split the full paragraph first so punctuation inside Japanese quotes keeps its dialogue voice.
-        for (const part of splitQuoted(paragraph)) {
-          for (const sentence of sentenceParts(part.text)) {
-            for (const text of splitLong(sentence)) {
-              if (text.trim()) {
-                const sourceText = text.trim();
-                result.push({
-                  chapterIndex: chapter.spineIndex,
-                  chapterTitle: chapter.title,
-                  text: applyReplacements(sourceText),
-                  sourceText,
-                  dialogue: part.dialogue,
-                });
+      const sourceText = chapter.text;
+      const spokenText = ttsConfig.useRubyReadings ? chapter.rubyText : chapter.text;
+      const sourceParagraphs = sourceText.split(/\\n+/u);
+      const spokenParagraphs = spokenText.split(/\\n+/u);
+      let sourceSearchFrom = 0;
+      let imageCursor = 0;
+      const imageOffsets = chapter.imageOffsets ?? [];
+
+      for (let paragraphIndex = 0; paragraphIndex < sourceParagraphs.length; paragraphIndex++) {
+        const paragraph = sourceParagraphs[paragraphIndex];
+        const spokenParagraph = spokenParagraphs[paragraphIndex] ?? paragraph;
+        const sourceParts = splitQuoted(paragraph);
+        const spokenParts = splitQuoted(spokenParagraph);
+
+        for (let partIndex = 0; partIndex < sourceParts.length; partIndex++) {
+          const part = sourceParts[partIndex];
+          const spokenPart = spokenParts[partIndex] ?? part;
+          const sourceSentences = sentenceParts(part.text);
+          const spokenSentences = sentenceParts(spokenPart.text);
+
+          for (let sentenceIndex = 0; sentenceIndex < sourceSentences.length; sentenceIndex++) {
+            const sentence = sourceSentences[sentenceIndex];
+            const spokenSentence = spokenSentences[sentenceIndex] ?? sentence;
+            const sourceChunks = splitLong(sentence);
+            const spokenChunks = splitLong(spokenSentence);
+            for (let chunkIndex = 0; chunkIndex < sourceChunks.length; chunkIndex++) {
+              const source = sourceChunks[chunkIndex].trim();
+              if (!source) continue;
+              const found = sourceText.indexOf(source, sourceSearchFrom);
+              const sourceStart = found >= 0 ? found : sourceSearchFrom;
+              if (found >= 0) sourceSearchFrom = found + source.length;
+
+              // Offsets from Rust count Unicode code points, whereas JS string indices use UTF-16.
+              const sourceCodePointStart = Array.from(sourceText.slice(0, sourceStart)).length;
+              const imagesBefore: number[] = [];
+              while (imageCursor < imageOffsets.length && imageOffsets[imageCursor] <= sourceCodePointStart) {
+                imagesBefore.push(imageCursor);
+                imageCursor++;
               }
+
+              const speech = sourceChunks.length === 1
+                ? (spokenChunks.length === 1 ? spokenChunks[0].trim() : spokenSentence.trim())
+                : source;
+              result.push({
+                chapterIndex: chapter.spineIndex,
+                chapterTitle: chapter.title,
+                text: applyReplacements(speech),
+                sourceText: source,
+                imagesBefore,
+                dialogue: part.dialogue,
+              });
             }
           }
         }
@@ -203,6 +241,8 @@
       return;
     }
     const segment = segments[segmentIndex];
+    await onReadSegment(segment.chapterIndex, segment.sourceText, segment.imagesBefore);
+    if (token !== runId || !active) return;
 
     if (ttsConfig.engine === "device") {
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -230,7 +270,6 @@
         onClearHighlight();
       };
       currentUtterance = utterance;
-      onReadSegment(segment.chapterIndex, segment.sourceText);
       window.speechSynthesis.speak(utterance);
       if (paused) window.speechSynthesis.pause();
       return;
@@ -265,7 +304,6 @@
         onClearHighlight();
       };
       currentAudio = audio;
-      onReadSegment(segment.chapterIndex, segment.sourceText);
       if (!paused) await audio.play();
     } catch (error) {
       if (token === runId) {
