@@ -30,7 +30,8 @@ use windows::{
     Foundation::AsyncStatus,
     Media::SpeechSynthesis::SpeechSynthesizer,
     Storage::Streams::DataReader,
-    core::{HSTRING, init_sta},
+    core::HSTRING,
+    Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_SINGLETHREADED},
 };
 
 use crate::{book, library};
@@ -914,9 +915,27 @@ async fn tts_edge_synthesize(text: &str, voice: &str, rate: f32, pitch: f32, opt
 
 
 #[cfg(windows)]
+struct WindowsSpeechApartment;
+
+#[cfg(windows)]
+impl WindowsSpeechApartment {
+    fn new() -> Result<Self, String> {
+        unsafe { RoInitialize(RO_INIT_SINGLETHREADED) }
+            .map_err(|error| format!("Could not initialize the Windows speech apartment: {error}"))?;
+        Ok(Self)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsSpeechApartment {
+    fn drop(&mut self) {
+        unsafe { RoUninitialize() };
+    }
+}
+
+#[cfg(windows)]
 fn windows_system_voice_list() -> Result<Vec<SystemTtsVoiceInfo>, String> {
-    let _apartment = init_sta()
-        .map_err(|error| format!("Could not initialize the Windows speech apartment: {error}"))?;
+    let _apartment = WindowsSpeechApartment::new()?;
     let voices = SpeechSynthesizer::AllVoices()
         .map_err(|error| format!("Windows could not enumerate installed speech voices: {error}"))?;
     let default_id = SpeechSynthesizer::DefaultVoice()
@@ -1046,8 +1065,10 @@ fn windows_system_synthesize(text: &str, voice_id: &str, rate: f32, pitch: f32) 
     synthesizer.SetVoice(&voice)
         .map_err(|error| format!("Could not select the Windows speech voice: {error}"))?;
 
-    let rate_percent = ((if rate.is_finite() { rate } else { 1.0 }.clamp(0.5, 3.0) - 1.0) * 100.0).round() as i32;
-    let pitch_percent = ((if pitch.is_finite() { pitch } else { 1.0 }.clamp(0.5, 2.0) - 1.0) * 100.0).round() as i32;
+    let normalized_rate = (if rate.is_finite() { rate } else { 1.0 }).clamp(0.5, 3.0);
+    let normalized_pitch = (if pitch.is_finite() { pitch } else { 1.0 }).clamp(0.5, 2.0);
+    let rate_percent = ((normalized_rate - 1.0) * 100.0).round() as i32;
+    let pitch_percent = ((normalized_pitch - 1.0) * 100.0).round() as i32;
     let ssml = format!(
         "<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"ja-JP\"><prosody rate=\"{rate_percent:+}%\" pitch=\"{pitch_percent:+}%\">{}</prosody></speak>",
         edge_xml(text)
