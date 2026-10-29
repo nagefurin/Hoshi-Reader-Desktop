@@ -107,8 +107,11 @@ impl TtsSynthesisOptions {
 static RE_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)</?(?:p|div|h[1-6]|li|ul|ol|blockquote|section|article|table|tr|td|th|br|hr|figure|figcaption)\b[^>]*>").unwrap()
 });
-static RE_RUBY_READING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?is)<ruby\b[^>]*>.*?<rt\b[^>]*>(.*?)</rt>.*?</ruby>").unwrap()
+static RE_RUBY_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<ruby\b[^>]*>.*?</ruby>").unwrap()
+});
+static RE_RUBY_RT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?is)<rt\b[^>]*>(.*?)</rt>").unwrap()
 });
 static RE_NUMERIC_ENTITY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"&#(x[0-9a-fA-F]+|[0-9]+);").unwrap());
@@ -139,7 +142,17 @@ fn decode_entities(value: &str) -> String {
 fn speakable_text(html: &str, use_ruby_readings: bool) -> String {
     let body = library::body(html);
     let ruby: Cow<'_, str> = if use_ruby_readings {
-        RE_RUBY_READING.replace_all(body, "$1")
+        RE_RUBY_BLOCK.replace_all(body, |captures: &Captures<'_>| {
+            let ruby_markup = &captures[0];
+            let readings = RE_RUBY_RT.captures_iter(ruby_markup)
+                .map(|capture| library::strip(&capture[1]))
+                .collect::<String>();
+            if readings.trim().is_empty() {
+                library::strip(ruby_markup)
+            } else {
+                readings
+            }
+        })
     } else {
         Cow::Borrowed(body)
     };
@@ -904,6 +917,19 @@ pub async fn tts_google_cloud_voices(api_key: String) -> Result<Vec<TtsVoiceInfo
 #[cfg(test)]
 mod edge_token_tests {
     use super::edge_gec;
+
+    #[test]
+    fn ruby_readings_use_all_rt_elements_in_a_ruby() {
+        let html = "<html><body><p><ruby><rb>漢</rb><rt>かん</rt><rb>字</rb><rt>じ</rt></ruby>を読む。</p></body></html>";
+        assert_eq!(super::speakable_text(html, true), "かんじを読む。");
+        assert_eq!(super::speakable_text(html, false), "漢字を読む。");
+    }
+
+    #[test]
+    fn ruby_readings_strip_nested_markup_inside_rt() {
+        let html = "<html><body><p><ruby><rb>今日</rb><rt><span>きょう</span></rt></ruby>です。</p></body></html>";
+        assert_eq!(super::speakable_text(html, true), "きょうです。");
+    }
 
     #[test]
     fn edge_gec_matches_upstream_vectors() {
