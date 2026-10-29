@@ -180,20 +180,6 @@ fn speakable_text_with_images(html: &str) -> (String, Vec<usize>) {
     (text, image_offsets)
 }
 
-fn local_or_private_host(host: &str) -> bool {
-    let host = host.trim_matches(['[', ']']).to_ascii_lowercase();
-    if host == "localhost" || host.ends_with(".localhost") || host.ends_with(".local") {
-        return true;
-    }
-    match host.parse::<IpAddr>() {
-        Ok(IpAddr::V4(address)) => {
-            address.is_loopback() || address.is_private() || address.is_link_local() || address.is_unspecified()
-        }
-        Ok(IpAddr::V6(address)) => address.is_loopback() || address.is_unspecified() || address.is_unique_local() || address.is_unicast_link_local(),
-        Err(_) => false,
-    }
-}
-
 fn request_client() -> Result<Client, String> {
     Client::builder()
         .timeout(Duration::from_secs(75))
@@ -759,9 +745,9 @@ fn edge_cookie() -> Result<HeaderValue, String> {
     HeaderValue::from_str(&value).map_err(|_| "Could not prepare Edge TTS request headers.".to_string())
 }
 
-async fn tts_edge_voice_list() -> Result<Vec<String>, String> {
+async fn tts_edge_voice_list() -> Result<Vec<TtsVoiceInfo>, String> {
     let url = edge_url("/voices/list", false)?;
-    // Android's OkHttp client follows fixed-service redirects; mirror that for the voice catalog.
+    // Mirror Android's default redirect-following HTTP client for the voice catalog.
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))
@@ -773,28 +759,20 @@ async fn tts_edge_voice_list() -> Result<Vec<String>, String> {
         .header(reqwest::header::ORIGIN, EDGE_ORIGIN)
         .header(reqwest::header::COOKIE, edge_cookie()?.to_str().map_err(|_| "Invalid Edge request cookie.")?)
         .send().await
-        .map_err(|_| "Could not connect to Microsoft Edge TTS.".to_string())?;
+        .map_err(|error| format!("Could not connect to Microsoft Edge TTS: {error}"))?;
     if !response.status().is_success() {
-        return Err(format!("Microsoft Edge TTS voice list returned HTTP {}.", response.status()));
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default().chars().take(240).collect::<String>();
+        return Err(format!("Microsoft Edge TTS voice list returned HTTP {status}: {detail}"));
     }
-    let content_type = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("unknown content type").to_string();
+    let content_type = response.headers().get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok()).unwrap_or("unknown content type").to_string();
     let status = response.status();
-    let bytes = response.bytes().await.map_err(|_| "Could not read Edge TTS voices.".to_string())?;
+    let bytes = response.bytes().await.map_err(|error| format!("Could not read Edge TTS voices: {error}"))?;
     if bytes.len() > 5 * 1024 * 1024 {
         return Err("Edge TTS voice list response was unexpectedly large.".to_string());
     }
-    let values: Vec<EdgeVoice> = serde_json::from_slice(&bytes).map_err(|error| {
-        let preview = String::from_utf8_lossy(&bytes).chars().take(240).collect::<String>();
-        format!("Microsoft Edge TTS returned an invalid voice list (HTTP {status}, {content_type}): {error}. Response: {preview}")
-    })?;
-    let mut voices: Vec<String> = values.into_iter()
-        .filter(|voice| voice.locale.eq_ignore_ascii_case("ja-JP"))
-        .map(|voice| voice.short_name)
-        .filter(|voice| !voice.trim().is_empty())
-        .collect();
-    voices.sort();
-    voices.dedup();
-    Ok(voices)
+    japanese_microsoft_voices(&bytes, &format!("Microsoft Edge (HTTP {status}, {content_type})"))
 }
 
 fn edge_xml(value: &str) -> String {
