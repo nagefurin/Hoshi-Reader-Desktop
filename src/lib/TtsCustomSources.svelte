@@ -184,6 +184,7 @@
       await audio.play();
       successMessage = "The source synthesized and played the Japanese test phrase.";
     } catch (error) {
+      stopPreview();
       errorMessage = String(error);
     } finally {
       busy = false;
@@ -194,7 +195,7 @@
 </script>
 
 <SettingsSection compact={compact} title="Custom online TTS sources">
-  <p class="mb-2 text-xs text-base-content/60">
+  <p class={compact ? "mb-1 text-xs text-base-content/60" : "mb-2 text-xs text-base-content/60"}>
     Configure OpenAI-compatible or VITS-compatible speech servers. Settings are stored locally; API keys are kept only for this session and must be entered again after restarting Hoshi.
   </p>
 
