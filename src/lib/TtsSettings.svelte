@@ -9,6 +9,9 @@
   let { compact = false, bookId = "" }: { compact?: boolean; bookId?: string } = $props();
 
   type TtsVoiceInfo = { id: string; styles: string[]; roles: string[] };
+  type SystemVoiceInfo = { voiceURI: string; name: string; lang: string; default: boolean };
+  type NativeSystemVoice = { id: string; name: string; language: string; isDefault: boolean };
+  const usesNativeWindowsSpeech = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
   const audioProfiles = [
     { id: "", label: "None" },
     { id: "wearable-class-device", label: "Wearable" },
@@ -66,9 +69,11 @@
     return list.find((voice) => voice.id === voiceId);
   });
 
-  let voices = $state<SpeechSynthesisVoice[]>([]);
+  let voices = $state<SystemVoiceInfo[]>([]);
   let systemVoiceCount = $state(0);
   let systemVoiceSummary = $state("");
+  let systemVoiceLoading = $state(false);
+  let systemVoiceError = $state("");
   let edgeVoices = $state<TtsVoiceInfo[]>([]);
   let edgeVoiceLoading = $state(false);
   let edgeVoiceError = $state("");
@@ -199,16 +204,55 @@
     if ((ttsConfig.engine as string) === "vits") changeEngine("device");
   });
 
-  function refreshSystemVoices() {
+  async function refreshSystemVoices() {
+    if (usesNativeWindowsSpeech) {
+      systemVoiceLoading = true;
+      systemVoiceError = "";
+      try {
+        const listed = await invoke<NativeSystemVoice[]>("tts_system_voices");
+        systemVoiceCount = listed.length;
+        systemVoiceSummary = listed.slice(0, 5).map((voice) => `${voice.name} (${voice.language})`).join(", ");
+        voices = listed
+          .filter((voice) => voice.language.trim().toLowerCase().startsWith("ja"))
+          .map((voice) => ({
+            voiceURI: voice.id,
+            name: voice.name,
+            lang: voice.language,
+            default: voice.isDefault,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (listed.length > 0) {
+          let changed = false;
+          if (ttsConfig.voice && !voices.some((voice) => voice.voiceURI === ttsConfig.voice)) {
+            ttsConfig.voice = "";
+            changed = true;
+          }
+          if (ttsConfig.dialogueVoice && !voices.some((voice) => voice.voiceURI === ttsConfig.dialogueVoice)) {
+            ttsConfig.dialogueVoice = "";
+            changed = true;
+          }
+          if (changed) saveTtsConfig();
+        }
+      } catch (error) {
+        voices = [];
+        systemVoiceCount = 0;
+        systemVoiceSummary = "";
+        systemVoiceError = String(error);
+      } finally {
+        systemVoiceLoading = false;
+      }
+      return;
+    }
+
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const listed = window.speechSynthesis.getVoices();
     systemVoiceCount = listed.length;
     systemVoiceSummary = listed.slice(0, 5).map((voice) => `${voice.name} (${voice.lang})`).join(", ");
     voices = listed
       .filter((voice) => voice.lang.trim().toLowerCase().startsWith("ja"))
+      .map((voice) => ({ voiceURI: voice.voiceURI, name: voice.name, lang: voice.lang, default: voice.default }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Never leave an English voice silently selected for Japanese text.
     if (listed.length > 0) {
       let changed = false;
       if (ttsConfig.voice && !voices.some((voice) => voice.voiceURI === ttsConfig.voice)) {
@@ -224,9 +268,13 @@
   }
 
   $effect(() => {
+    if (usesNativeWindowsSpeech) {
+      void refreshSystemVoices();
+      return;
+    }
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     const speech = window.speechSynthesis;
-    refreshSystemVoices();
+    void refreshSystemVoices();
     speech.addEventListener("voiceschanged", refreshSystemVoices);
     return () => speech.removeEventListener("voiceschanged", refreshSystemVoices);
   });
@@ -277,18 +325,26 @@
     </SettingRow>
     {#if voices.length === 0}
       <div class="flex flex-col items-start gap-2">
-        <p class="text-xs text-warning">
-          {systemVoiceCount === 0
-            ? "No system voices are listed yet. Refresh after Windows finishes loading speech services."
-            : `Windows exposes ${systemVoiceCount} system voice(s), but none is Japanese. Device TTS cannot pronounce Japanese correctly without an installed Japanese speech voice.`}
-        </p>
-        {#if systemVoiceCount > 0}
-          <p class="text-xs text-base-content/60">Voices exposed to Hoshi: {systemVoiceSummary || "Names unavailable"}.</p>
-          <p class="text-xs text-base-content/60">
-            In Windows, open Settings → Time & language → Language & region → Japanese → Language options, then install the Speech feature if offered. Restart Hoshi and refresh the voices afterward. Narrator's separately downloaded natural voices may not be exposed to the WebView speech API. Microsoft Edge (online) works without a local voice.
+        {#if systemVoiceError}
+          <p class="text-xs text-error">Could not query Windows native speech voices: {systemVoiceError}</p>
+        {:else}
+          <p class="text-xs text-warning">
+            {systemVoiceLoading
+              ? "Loading Windows native speech voices…"
+              : systemVoiceCount === 0
+                ? "No system voices are listed yet. Refresh after Windows finishes loading speech services."
+                : `Windows exposes ${systemVoiceCount} system voice(s), but none is Japanese. Device TTS cannot pronounce Japanese correctly without an installed Japanese speech voice.`}
           </p>
+          {#if systemVoiceCount > 0}
+            <p class="text-xs text-base-content/60">Voices exposed to Hoshi: {systemVoiceSummary || "Names unavailable"}.</p>
+            <p class="text-xs text-base-content/60">
+              On Windows, open Settings → Time & language → Language & region → Japanese → Language options, then install the Speech feature if offered. Restart Hoshi and refresh afterward. The Windows-native voice list is queried separately from WebView speech synthesis. Microsoft Edge (online) works without a local voice.
+            </p>
+          {/if}
         {/if}
-        <button class="btn btn-outline btn-xs" onclick={refreshSystemVoices}>Refresh system voices</button>
+        <button class="btn btn-outline btn-xs" onclick={refreshSystemVoices} disabled={systemVoiceLoading}>
+          {systemVoiceLoading ? "Refreshing…" : "Refresh system voices"}
+        </button>
       </div>
     {/if}
   {:else if ttsConfig.engine === "edge"}
