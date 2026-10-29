@@ -429,6 +429,7 @@
     if (segmentIndex >= segments.length) {
       active = false;
       paused = false;
+      sessionActive = false;
       onClearHighlight();
       return;
     }
@@ -491,9 +492,7 @@
       const mimeType = audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
       const audio = new Audio("data:" + mimeType + ";base64," + encoded);
       audio.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
-      audio.playbackRate = ttsConfig.engine === "device" && usesNativeWindowsSpeech
-        ? Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1))
-        : Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
+      audio.playbackRate = Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
       audio.onended = () => {
         if (token !== runId || !active) return;
         void advanceAfterSegment(segmentIndex, token);
