@@ -395,11 +395,11 @@ fn hmac_sha256(key: &[u8], message: &[u8]) -> Vec<u8> {
     };
     key_block.resize(BLOCK, 0);
     let mut inner = Vec::with_capacity(BLOCK + message.len());
-    inner.extend(key_block.iter().map(|byte| byte ^ 0x36));
+    inner.extend(key_block.iter().map(|byte| *byte ^ 0x36));
     inner.extend_from_slice(message);
     let inner_hash = Sha256::digest(&inner);
     let mut outer = Vec::with_capacity(BLOCK + inner_hash.len());
-    outer.extend(key_block.iter().map(|byte| byte ^ 0x5c));
+    outer.extend(key_block.iter().map(|byte| *byte ^ 0x5c));
     outer.extend_from_slice(&inner_hash);
     Sha256::digest(&outer).to_vec()
 }
