@@ -1219,6 +1219,22 @@ mod edge_token_tests {
     }
 
     #[test]
+    fn ruby_range_joins_multiple_rt_elements_and_ignores_rp_fallback() {
+        let html = "<html><body><p><ruby><rb>漢</rb><rp>(</rp><rt>かん</rt><rb>字</rb><rt><span>じ</span></rt><rp>)</rp></ruby>です。</p></body></html>";
+        let (text, _, ranges) = super::speakable_text_with_images(html);
+        assert_eq!(text, "漢字です。");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].reading, "かんじ");
+    }
+
+    #[test]
+    fn ruby_range_decodes_numeric_entities_before_html_stripping() {
+        let html = "<html><body><p><ruby>漢<rt>&#12363;ん</rt></ruby>字。</p></body></html>";
+        let (_, _, ranges) = super::speakable_text_with_images(html);
+        assert_eq!(ranges[0].reading, "かん");
+    }
+
+    #[test]
     fn edge_gec_matches_upstream_vectors() {
         let expected = "492D7694A183A45E-56E821F95D4579C5B7C7E33DC7303FF379EC36D510213555BBBB9EB17EF15876";
         assert_eq!(edge_gec(1_791_888_000), expected);
