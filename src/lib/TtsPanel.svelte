@@ -4,6 +4,7 @@
   import { AudioLines, Pause, Play, SkipBack, SkipForward, Square } from "@lucide/svelte";
   import { ttsConfig, ttsRuntime } from "./ttsConfig.svelte";
   import TtsSettings from "./TtsSettings.svelte";
+  import { sasayakiConfig } from "./sasayakiConfig.svelte";
 
   type TtsChapter = {
     spineIndex: number;
@@ -26,12 +27,14 @@
     id,
     title,
     currentChapterIndex,
+    lookupActive = false,
     onReadSegment,
     onClearHighlight,
   }: {
     id: string;
     title: string;
     currentChapterIndex: number;
+    lookupActive?: boolean;
     onReadSegment: (spineIndex: number, sourceText: string, imagesBefore: number[]) => Promise<void>;
     onClearHighlight: () => void;
   } = $props();
@@ -46,6 +49,18 @@
   let runId = 0;
   let currentAudio: HTMLAudioElement | null = null;
   let currentUtterance: SpeechSynthesisUtterance | null = null;
+  let autoPausedForLookup = false;
+
+  $effect(() => {
+    const shouldPauseForLookup = lookupActive && sasayakiConfig.sasayakiAutoPause;
+    if (shouldPauseForLookup && active && !paused && !autoPausedForLookup) {
+      autoPausedForLookup = true;
+      pausePlayback();
+    } else if (!shouldPauseForLookup && autoPausedForLookup) {
+      autoPausedForLookup = false;
+      if (active && paused) void resumePlayback();
+    }
+  });
 
   const currentSegment = $derived(segments[position] ?? null);
   const progressText = $derived(segments.length ? (Math.min(position + 1, segments.length) + " / " + segments.length) : "—");
@@ -315,31 +330,38 @@
     }
   }
 
+  function pausePlayback() {
+    paused = true;
+    if (ttsConfig.engine === "device") {
+      if ("speechSynthesis" in window) window.speechSynthesis.pause();
+    } else {
+      currentAudio?.pause();
+    }
+  }
+
+  async function resumePlayback() {
+    paused = false;
+    if (ttsConfig.engine === "device") {
+      if ("speechSynthesis" in window) window.speechSynthesis.resume();
+    } else if (currentAudio) {
+      try {
+        await currentAudio.play();
+      } catch (error) {
+        errorMessage = String(error);
+        active = false;
+        onClearHighlight();
+      }
+    }
+  }
+
   async function togglePlayback() {
+    autoPausedForLookup = false;
     if (!active) {
       await playFrom(currentChapterIndex);
       return;
     }
-    if (!paused) {
-      paused = true;
-      if (ttsConfig.engine === "device") {
-        if ("speechSynthesis" in window) window.speechSynthesis.pause();
-      } else {
-        currentAudio?.pause();
-      }
-    } else {
-      paused = false;
-      if (ttsConfig.engine === "device") {
-        if ("speechSynthesis" in window) window.speechSynthesis.resume();
-      } else if (currentAudio) {
-        try {
-          await currentAudio.play();
-        } catch (error) {
-          errorMessage = String(error);
-          active = false;
-        }
-      }
-    }
+    if (!paused) pausePlayback();
+    else await resumePlayback();
   }
 
   function stop() {
