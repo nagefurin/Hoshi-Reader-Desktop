@@ -19,6 +19,7 @@ export type TtsConfig = {
   endpoint: string;
   model: string;
   remoteVoice: string;
+  edgeVoice: string;
   vitsModel: "vits" | "w2v2-vits" | "bert-vits2" | "gpt-sovits";
   speakerId: number;
   replacements: TtsReplacement[];
@@ -36,6 +37,7 @@ const defaults: TtsConfig = {
   endpoint: "",
   model: "tts-1",
   remoteVoice: "alloy",
+  edgeVoice: "ja-JP-NanamiNeural",
   vitsModel: "vits",
   speakerId: 0,
   replacements: [],

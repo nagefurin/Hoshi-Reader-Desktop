@@ -23,8 +23,8 @@
     edgeVoiceError = "";
     try {
       edgeVoices = await invoke<string[]>("tts_edge_voices");
-      if (edgeVoices.length && !edgeVoices.includes(ttsConfig.remoteVoice)) {
-        ttsConfig.remoteVoice = edgeVoices.includes("ja-JP-NanamiNeural")
+      if (edgeVoices.length && !edgeVoices.includes(ttsConfig.edgeVoice)) {
+        ttsConfig.edgeVoice = edgeVoices.includes("ja-JP-NanamiNeural")
           ? "ja-JP-NanamiNeural"
           : edgeVoices[0];
         saveTtsConfig();
@@ -105,9 +105,9 @@
   {:else if ttsConfig.engine === "edge"}
     <SettingRow label="Japanese Voice">
       <div class="flex max-w-lg flex-1 items-center gap-2">
-        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.remoteVoice} onchange={save}>
+        <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.edgeVoice} onchange={save}>
           {#if edgeVoices.length === 0}
-            <option value={ttsConfig.remoteVoice}>{ttsConfig.remoteVoice || "Load voices"}</option>
+            <option value={ttsConfig.edgeVoice}>{ttsConfig.edgeVoice || "Load voices"}</option>
           {/if}
           {#each edgeVoices as voice (voice)}
             <option value={voice}>{voice}</option>

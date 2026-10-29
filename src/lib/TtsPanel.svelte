@@ -238,7 +238,7 @@
         baseUrl: ttsConfig.endpoint,
         apiKey: ttsRuntime.apiKey,
         model: ttsConfig.model,
-        voice: ttsConfig.remoteVoice,
+        voice: ttsConfig.engine === "edge" ? ttsConfig.edgeVoice : ttsConfig.remoteVoice,
         rate: Number(ttsConfig.rate) || 1,
         pitch: Number(ttsConfig.pitch) || 0,
         vitsModel: ttsConfig.vitsModel,

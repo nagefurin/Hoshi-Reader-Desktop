@@ -29,7 +29,7 @@ Download the `.dmg` for macOS 15+ (Apple Silicon) or the `-setup.exe` for Window
 - Vertical (縦書き) and horizontal (横書き) text
 - Pop-up dictionary with support for Yomitan term, frequency, pitch and kanji dictionaries
 - Audio support for local and remote sources
-- Text-to-speech with system voices and configurable online/self-hosted providers
+- Text-to-speech with system voices, Microsoft Edge TTS, Google Translate, and configurable OpenAI-compatible/VITS providers
 - Sasayaki (audiobooks)
 - Reading statistics
 - Mining using AnkiConnect (mainly supports handlebars used by [Lapis](https://github.com/donkuri/lapis#how-to-use-lapis))
