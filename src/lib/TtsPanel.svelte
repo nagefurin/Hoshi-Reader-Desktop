@@ -6,6 +6,8 @@
   import TtsSettings from "./TtsSettings.svelte";
   import { sasayakiConfig } from "./sasayakiConfig.svelte";
 
+  const usesNativeWindowsSpeech = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+
   type TtsChapter = {
     spineIndex: number;
     title: string;
@@ -262,6 +264,7 @@
   }
 
   function synthesisVoice(segment: SpokenSegment): string {
+    if (ttsConfig.engine === "device") return segment.dialogue && ttsConfig.dialogueVoice ? ttsConfig.dialogueVoice : ttsConfig.voice;
     if (ttsConfig.engine === "edge") return segment.dialogue ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice) : ttsConfig.edgeVoice;
     if (ttsConfig.engine === "azure") return segment.dialogue ? (ttsConfig.azureDialogueVoice || ttsConfig.azureVoice) : ttsConfig.azureVoice;
     if (ttsConfig.engine === "microsoftTranslator") return segment.dialogue
@@ -277,6 +280,7 @@
   function synthesisFingerprint(): string {
     return JSON.stringify([
       ttsConfig.engine, ttsConfig.rate, ttsConfig.pitch,
+      ttsConfig.voice, ttsConfig.dialogueVoice,
       ttsConfig.edgeVoice, ttsConfig.edgeDialogueVoice, ttsConfig.azureRegion,
       ttsConfig.azureVoice, ttsConfig.azureDialogueVoice, ttsConfig.microsoftTranslatorVoice,
       ttsConfig.microsoftTranslatorDialogueVoice, ttsConfig.googleCloudVoice,
@@ -295,7 +299,7 @@
 
     let promise: Promise<string>;
     promise = invoke<string>("tts_synthesize", {
-      engine: ttsConfig.engine,
+      engine: ttsConfig.engine === "device" && usesNativeWindowsSpeech ? "system" : ttsConfig.engine,
       text: segment.text,
       baseUrl: ttsConfig.engine === "azure" ? ttsConfig.azureRegion : "",
       apiKey: ttsConfig.engine === "azure"
@@ -432,7 +436,7 @@
     await onReadSegment(segment.chapterIndex, segment.sourceText, segment.imagesBefore);
     if (token !== runId || !active) return;
 
-    if (ttsConfig.engine === "device") {
+    if (ttsConfig.engine === "device" && !usesNativeWindowsSpeech) {
       if (typeof window === "undefined" || !("speechSynthesis" in window)) {
         errorMessage = "System speech synthesis is not available in this WebView.";
         active = false;
@@ -479,13 +483,17 @@
     try {
       const encoded = await synthesizedAudio(segmentIndex);
       if (token !== runId) return;
-      const audioFormat = ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)
-        ? ttsConfig.providerOptions[ttsConfig.engine]?.format ?? "mp3"
-        : "mp3";
+      const audioFormat = ttsConfig.engine === "device" && usesNativeWindowsSpeech
+        ? "wav"
+        : ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)
+          ? ttsConfig.providerOptions[ttsConfig.engine]?.format ?? "mp3"
+          : "mp3";
       const mimeType = audioFormat === "wav" ? "audio/wav" : "audio/mpeg";
       const audio = new Audio("data:" + mimeType + ";base64," + encoded);
       audio.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
-      audio.playbackRate = Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
+      audio.playbackRate = ttsConfig.engine === "device" && usesNativeWindowsSpeech
+        ? Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1))
+        : Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
       audio.onended = () => {
         if (token !== runId || !active) return;
         void advanceAfterSegment(segmentIndex, token);
@@ -514,7 +522,7 @@
 
   function pausePlayback() {
     paused = true;
-    if (ttsConfig.engine === "device") {
+    if (ttsConfig.engine === "device" && !usesNativeWindowsSpeech) {
       if ("speechSynthesis" in window) window.speechSynthesis.pause();
     } else {
       currentAudio?.pause();
@@ -530,7 +538,7 @@
       return;
     }
     if (pendingNextPosition !== null && waitingBetweenSentences) return;
-    if (ttsConfig.engine === "device") {
+    if (ttsConfig.engine === "device" && !usesNativeWindowsSpeech) {
       if ("speechSynthesis" in window) window.speechSynthesis.resume();
     } else if (currentAudio) {
       try {
