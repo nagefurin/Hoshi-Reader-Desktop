@@ -2401,6 +2401,7 @@
             {title}
             currentChapterIndex={index}
             lookupActive={popups.length > 0}
+            continuousMode={continuous}
             onReadSegment={onTtsReadSegment}
             onClearHighlight={clearTtsHighlight}
           />
