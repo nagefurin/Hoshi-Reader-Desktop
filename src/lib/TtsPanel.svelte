@@ -25,14 +25,24 @@
     dialogue: boolean;
   };
 
+  type TtsControlApi = {
+    previous: () => void;
+    next: () => void;
+    repeat: () => void;
+    togglePlayback: () => void;
+  };
+
   let {
     id,
     title,
     currentChapterIndex,
     lookupActive = false,
     continuousMode = false,
+    sessionActive = $bindable(false),
+    playing = $bindable(false),
     onReadSegment,
     onHoldImages,
+    onControlApi,
     onClearHighlight,
   }: {
     id: string;
@@ -40,8 +50,11 @@
     currentChapterIndex: number;
     lookupActive?: boolean;
     continuousMode?: boolean;
+    sessionActive?: boolean;
+    playing?: boolean;
     onReadSegment: (spineIndex: number, sourceText: string, imagesBefore: number[]) => Promise<void>;
     onHoldImages: (spineIndex: number, sourceText: string, images: number[]) => Promise<void>;
+    onControlApi?: (api: TtsControlApi | null) => void;
     onClearHighlight: () => void;
   } = $props();
 
@@ -69,6 +82,15 @@
       autoPausedForLookup = false;
       if (active && paused) void resumePlayback();
     }
+  });
+
+  $effect(() => {
+    playing = active && !paused;
+  });
+
+  $effect(() => {
+    onControlApi?.({ previous, next, repeat: repeatCurrent, togglePlayback });
+    return () => onControlApi?.(null);
   });
 
   const currentSegment = $derived(segments[position] ?? null);
@@ -320,6 +342,7 @@
       audioCache.clear();
       if (segments.length === 0) throw new Error("No readable text remains after pronunciation replacements.");
       position = 0;
+      sessionActive = true;
       active = true;
       await speakAt(position, token);
     } catch (error) {
@@ -341,6 +364,11 @@
   function previous() {
     if (!segments.length) return;
     jumpTo(Math.max(position - 1, 0));
+  }
+
+  function repeatCurrent() {
+    if (!segments.length) return;
+    jumpTo(Math.min(position, segments.length - 1));
   }
 
   function jumpTo(nextPosition: number) {
@@ -371,9 +399,20 @@
         return;
       }
       const utterance = new SpeechSynthesisUtterance(segment.text);
-      const availableVoices = window.speechSynthesis.getVoices();
+      utterance.lang = "ja-JP";
+      const japaneseVoices = window.speechSynthesis.getVoices()
+        .filter((voice) => voice.lang.trim().toLowerCase().startsWith("ja"));
+      if (japaneseVoices.length === 0) {
+        errorMessage = "No Japanese system speech voice is available in this WebView. Install a Japanese Windows speech voice, then refresh the voices in TTS settings. Microsoft Edge (online) is an alternative.";
+        active = false;
+        paused = false;
+        onClearHighlight();
+        return;
+      }
       const voiceUri = segment.dialogue && ttsConfig.dialogueVoice ? ttsConfig.dialogueVoice : ttsConfig.voice;
-      if (voiceUri) utterance.voice = availableVoices.find((voice) => voice.voiceURI === voiceUri) ?? null;
+      utterance.voice = japaneseVoices.find((voice) => voice.voiceURI === voiceUri)
+        ?? japaneseVoices.find((voice) => voice.default)
+        ?? japaneseVoices[0];
       utterance.rate = Math.min(3, Math.max(0.5, (Number(ttsConfig.rate) || 1) * (Number(ttsConfig.playbackRate) || 1)));
       utterance.pitch = Math.min(2, Math.max(0.5, Number(ttsConfig.pitch) || 1));
       utterance.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
@@ -474,6 +513,7 @@
     active = false;
     paused = false;
     loading = false;
+    sessionActive = false;
     onClearHighlight();
   }
 
@@ -486,7 +526,7 @@
   <div class="flex items-start gap-3">
     <div class="rounded-box bg-primary/10 p-2 text-primary"><AudioLines class="size-5" /></div>
     <div class="min-w-0 flex-1">
-      <p class="text-sm font-semibold">Text-to-Speech</p>
+      <p class="text-sm font-semibold">TTS</p>
       <p class="line-clamp-2 text-xs text-base-content/60">{title}</p>
       <p class="mt-1 text-xs text-base-content/60">
         {ttsConfig.engine === "device" ? "System voice" :
@@ -546,7 +586,7 @@
     </div>
   {/if}
   <details class="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
-    <summary class="collapse-title min-h-0 py-3 text-sm font-medium">Text-to-Speech settings</summary>
+    <summary class="collapse-title min-h-0 py-3 text-sm font-medium">TTS settings</summary>
     <div class="collapse-content overflow-x-hidden">
       <TtsSettings compact={true} bookId={id} />
     </div>
