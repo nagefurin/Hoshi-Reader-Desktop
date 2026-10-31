@@ -817,3 +817,71 @@ fn encode_opus(samples: &[i16], rate: u32, channels: usize) -> Option<Vec<u8>> {
     }
     Some(writer.into_inner())
 }
+
+/// Decode all generated TTS chunks, concatenate them in order, and encode a single
+/// Ogg Opus file. Temporary files are removed regardless of decode success.
+pub(crate) fn encode_tts_audio_parts_to_opus(
+    parts: Vec<Vec<u8>>,
+    mime: &str,
+) -> Option<Vec<u8>> {
+    let extension = match mime {
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        _ => return None,
+    };
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut samples = Vec::new();
+    let mut sample_rate = None;
+    let mut channels = None;
+    let mut total_bytes = 0usize;
+
+    for bytes in parts {
+        if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+            return None;
+        }
+        total_bytes = total_bytes.checked_add(bytes.len())?;
+        if total_bytes > 64 * 1024 * 1024 {
+            return None;
+        }
+
+        let path = std::env::temp_dir().join(format!(
+            "hoshi-tts-{}.{}",
+            uuid::Uuid::new_v4(),
+            extension,
+        ));
+        fs::write(&path, &bytes).ok()?;
+        let decoded = crate::pcm::decode(&path, 0.0, 4.0 * 60.0 * 60.0, mime);
+        let _ = fs::remove_file(&path);
+        let (chunk, rate, channel_count) = decoded?;
+
+        if chunk.is_empty() || channel_count == 0 || channel_count > 2
+            || chunk.len() % channel_count != 0
+        {
+            return None;
+        }
+        if let Some(expected_rate) = sample_rate {
+            if expected_rate != rate || channels != Some(channel_count) {
+                return None;
+            }
+        } else {
+            sample_rate = Some(rate);
+            channels = Some(channel_count);
+        }
+
+        if samples.len().checked_add(chunk.len())? > 32 * 1024 * 1024 {
+            return None;
+        }
+        samples.extend(chunk);
+    }
+
+    let rate = sample_rate?;
+    let mut channels = channels?;
+    if channels == 2 && samples.chunks_exact(2).all(|frame| frame[0] == frame[1]) {
+        samples = samples.into_iter().step_by(2).collect();
+        channels = 1;
+    }
+    encode_opus(&samples, rate, channels)
+}

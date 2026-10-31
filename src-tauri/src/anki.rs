@@ -929,31 +929,43 @@ pub async fn anki_mine(
     }
 
     if !sasayaki_audio_fields.is_empty() {
-        let extension = context.tts_audio_format.as_deref()
-            .filter(|format| matches!(*format, "mp3" | "wav"));
-        let mut tts_audio_added = false;
-        if let Some(extension) = extension {
-            for encoded in &context.tts_audio_parts {
-                let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-                    continue;
-                };
+        let mime = match context.tts_audio_format.as_deref() {
+            Some("mp3") => Some("audio/mpeg"),
+            Some("wav") => Some("audio/wav"),
+            _ => None,
+        };
+        let decoded_parts: Option<Vec<Vec<u8>>> = mime.and_then(|_| {
+            context.tts_audio_parts.iter().map(|encoded| {
+                let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
                 if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
-                    continue;
+                    return None;
                 }
-                let data = base64(&bytes);
-                let filename = format!("hoshi_tts_{}.{extension}", sha1_hex(&bytes));
-                audio_media.push(
-                    json!({ "data": data, "filename": filename, "fields": sasayaki_audio_fields.clone() }),
-                );
-                tts_audio_added = true;
+                Some(bytes)
+            }).collect()
+        });
+        let tts_bytes = if let (Some(mime), Some(parts)) = (mime, decoded_parts) {
+            let valid_total = parts.iter().try_fold(0usize, |sum, part| sum.checked_add(part.len()))
+                .is_some_and(|total| total <= 64 * 1024 * 1024);
+            if valid_total {
+                tauri::async_runtime::spawn_blocking(move || {
+                    sasayaki::encode_tts_audio_parts_to_opus(parts, mime)
+                }).await.ok().flatten()
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         // Prefer TTS audio when it can be exported; keep the original Sasayaki
         // clip as a fallback for unsupported system voices or unavailable TTS audio.
-        if !tts_audio_added
-            && let (Some(book_id), Some(cue_id)) = (&context.book_id, &context.sasayaki_cue)
-        {
+        if let Some(bytes) = tts_bytes {
+            let data = base64(&bytes);
+            let filename = format!("hoshi_tts_{}.opus", sha1_hex(&bytes));
+            audio_media.push(
+                json!({ "data": data, "filename": filename, "fields": sasayaki_audio_fields.clone() }),
+            );
+        } else if let (Some(book_id), Some(cue_id)) = (&context.book_id, &context.sasayaki_cue) {
             let app_clone = app.clone();
             let book_id = book_id.clone();
             let cue_id = cue_id.clone();
