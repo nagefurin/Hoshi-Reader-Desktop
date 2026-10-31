@@ -267,6 +267,12 @@
     );
   }
 
+  // Resolve any legacy conflicting saved state in favor of Sasayaki.
+  if (sasayakiConfig.enableSasayaki && ttsConfig.enableTts) {
+    ttsConfig.enableTts = false;
+    saveTtsConfig();
+  }
+
   let sasayaki = $state.raw<SasayakiPlayer | null>(
     sasayakiConfig.enableSasayaki ? createSasayakiPlayer() : null,
   );
@@ -1967,16 +1973,16 @@
         </button>
 
         <button
-            class="btn btn-ghost btn-sm btn-square {readerPanel === 'Sasayaki'
-              ? 'btn-active text-primary'
-              : 'text-base-content/60'}"
+          class="btn btn-ghost btn-sm btn-square {readerPanel === 'Sasayaki' || sasayakiConfig.enableSasayaki
+            ? 'btn-active text-primary'
+            : 'text-base-content/60'}"
             title="Sasayaki"
             onclick={() => openReaderPanel(readerPanel === "Sasayaki" ? null : "Sasayaki")}
           >
             <AudioLines class="size-4" />
           </button>
         <button
-          class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS'
+          class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS' || ttsConfig.enableTts
             ? 'btn-active text-primary'
             : 'text-base-content/60'}"
           title="TTS"
