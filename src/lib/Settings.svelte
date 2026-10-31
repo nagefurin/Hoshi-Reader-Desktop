@@ -66,6 +66,7 @@
   } from "./hotkeyConfig.svelte";
   import { Sortable } from "./sortable.svelte";
   import { sasayakiConfig, saveSasayakiConfig } from "./sasayakiConfig.svelte";
+  import { ttsConfig, saveTtsConfig } from "./ttsConfig.svelte";
   import { attachPrompt, configureSync, syncConfig, saveSyncConfig, syncProviders } from "./syncConfig.svelte";
   import Appearance from "./Appearance.svelte";
   import About from "./About.svelte";
@@ -1372,7 +1373,13 @@
           <SettingToggle
             label="Enable"
             bind:checked={sasayakiConfig.enableSasayaki}
-            onchange={saveSasayakiConfig}
+            onchange={() => {
+              if (sasayakiConfig.enableSasayaki) {
+                ttsConfig.enableTts = false;
+                saveTtsConfig();
+              }
+              saveSasayakiConfig();
+            }}
           />
         </SettingsSection>
 

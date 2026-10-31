@@ -296,6 +296,19 @@
 </script>
 
 <SettingsSection compact={compact} title="Speech Engine">
+  <SettingToggle
+    compact={compact}
+    label="Enable"
+    bind:checked={ttsConfig.enableTts}
+    onchange={() => {
+      if (ttsConfig.enableTts) {
+        sasayakiConfig.enableSasayaki = false;
+        saveSasayakiConfig();
+      }
+      saveTtsConfig();
+    }}
+  />
+  <p class="text-xs text-base-content/60">Enabling TTS automatically disables Sasayaki. Only one sentence-audio source can be enabled at a time.</p>
   <SettingRow compact={compact} label="Provider">
     <select class="select select-sm w-52" value={ttsConfig.engine} onchange={(event) => changeEngine(event.currentTarget.value)}>
       <option value="device">Device / system voice</option>

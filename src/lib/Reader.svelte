@@ -54,6 +54,7 @@
   import SettingSlider from "./SettingSlider.svelte";
   import { infoColor, readerBackground, readerTextColor, resolvedScheme } from "./theme.svelte";
   import { sasayakiConfig } from "./sasayakiConfig.svelte";
+  import { ttsConfig } from "./ttsConfig.svelte";
   import { SasayakiPlayer } from "./sasayakiPlayer.svelte";
   import MatchDialog from "./MatchDialog.svelte";
   import { dictConfig } from "./dictConfig.svelte";
@@ -640,12 +641,17 @@
 
   async function mineEntry(content: MineContent, popup: PopupInstance): Promise<boolean> {
     const slotIndex = Number(content.slotIndex) || 0;
+    const sentenceAudioSource = sasayakiConfig.enableSasayaki
+      ? "sasayaki"
+      : ttsConfig.enableTts
+        ? "tts"
+        : "none";
     let ttsAudio: { parts: string[]; format: "mp3" | "wav" } | null = null;
-    if (popupAnki?.sasayakiAudioFormats[slotIndex]) {
+    if (sentenceAudioSource === "tts" && popupAnki?.sasayakiAudioFormats[slotIndex]) {
       try {
         ttsAudio = await ttsControlApi?.synthesizeForAnki(popup.sentence, popup.chapterIndex) ?? null;
       } catch (error) {
-        console.warn("Could not generate TTS audio for Anki; falling back to Sasayaki audio.", error);
+        console.warn("Could not generate TTS audio for Anki; leaving the sentence-audio field empty.", error);
       }
     }
     return invoke<boolean>("anki_mine", {
@@ -655,7 +661,8 @@
         clozeOffset: popup.clozeOffset,
         documentTitle: title,
         bookId: id,
-        sasayakiCue: popup.sasayakiCue?.id ?? null,
+        sentenceAudioSource,
+        sasayakiCue: sentenceAudioSource === "sasayaki" ? popup.sasayakiCue?.id ?? null : null,
         sasayakiAudioFormat: sasayakiConfig.sasayakiAudioFormat,
         ttsAudioParts: ttsAudio?.parts ?? [],
         ttsAudioFormat: ttsAudio?.format ?? null,
@@ -1930,6 +1937,7 @@
             <AudioLines class="size-4" />
           </button>
         {/if}
+        {#if ttsConfig.enableTts}
         <button
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS'
             ? 'btn-active text-primary'
@@ -1939,6 +1947,7 @@
         >
           <Volume2 class="size-4" />
         </button>
+        {/if}
         <button
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'Appearance'
             ? 'btn-active text-primary'
@@ -2461,7 +2470,7 @@
         </div>
       {/if}
 
-      {#if side === "right"}
+      {#if side === "right" && ttsConfig.enableTts}
         <div class="min-h-0 flex-1 flex-col {panel === 'TTS' ? 'flex' : 'hidden'}">
           <TtsPanel
             {id}

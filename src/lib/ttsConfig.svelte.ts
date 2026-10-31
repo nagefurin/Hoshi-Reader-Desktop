@@ -64,6 +64,7 @@ const providerOptions = () => ({
 });
 
 export type TtsConfig = {
+  enableTts: boolean;
   engine: TtsEngine;
   customSources: TtsCustomSource[];
   voice: string;
@@ -90,6 +91,7 @@ export type TtsConfig = {
 };
 
 const defaults: TtsConfig = {
+  enableTts: false,
   engine: "device",
   customSources: [],
   voice: "",
