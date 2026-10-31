@@ -351,7 +351,7 @@
 
   let frameSeq = 0;
   let frames = $state<{ key: number; src: string }[]>([
-    { key: 0, src: syncOnOpen || sasayaki ? blankSrc : frameSrc() },
+    { key: 0, src: syncOnOpen || sasayakiConfig.enableSasayaki ? blankSrc : frameSrc() },
   ]);
   const frameEls = new Map<number, HTMLIFrameElement>();
   const frameWheelAt = new Map<number, number>();
@@ -544,6 +544,22 @@
   function toggleSasayakiPlayback() {
     if (wasPaused) wasPaused = false;
     else sasayaki?.togglePlayback();
+  }
+
+  function popupSasayaki(popup: PopupInstance) {
+    const player = sasayaki;
+    const cue = popup.sasayakiCue;
+    if (!cue || !player?.hasAudio) return null;
+    return {
+      playing: player.isPlaying || wasPaused,
+      onReplay: () => player.playCue(cue, true),
+      onToggle: toggleSasayakiPlayback,
+      onResume: () => {
+        player.playCue(cue, false);
+        wasPaused = false;
+        closePopups();
+      },
+    };
   }
 
   function closePopups(keep = 0, clearSelection = true) {
@@ -2462,18 +2478,7 @@
       hasChild={i < popups.length - 1}
       placement={popup.placement}
       zIndex={30 + i}
-      sasayaki={popup.sasayakiCue && sasayaki?.hasAudio
-        ? {
-            playing: sasayaki.isPlaying || wasPaused,
-            onReplay: () => sasayaki.playCue(popup.sasayakiCue!, true),
-            onToggle: toggleSasayakiPlayback,
-            onResume: () => {
-              sasayaki.playCue(popup.sasayakiCue!, false);
-              wasPaused = false;
-              closePopups();
-            },
-          }
-        : null}
+      sasayaki={popupSasayaki(popup)}
       onRedirect={lookup}
       onKanjiRedirect={redirectKanji}
       onSelected={(text, sentence, offset, rect) => popupLookup(i, text, sentence, offset, rect)}
@@ -2665,93 +2670,94 @@
             onchange={() => void setSasayakiEnabled(sasayakiConfig.enableSasayaki)}
           />
           {#if sasayaki}
+            {@const player = sasayaki}
           <div class="card border border-base-300">
             <div class="card-body gap-4 p-3">
               <div class="flex min-w-0 items-center gap-3">
-                {#if sasayaki.cover}
-                  <img src={sasayaki.cover} alt="" class="size-12 shrink-0 rounded-md object-cover" />
+                {#if player.cover}
+                  <img src={player.cover} alt="" class="size-12 shrink-0 rounded-md object-cover" />
                 {/if}
-                <span class="truncate text-sm">{sasayaki.playback.audioPath?.split(/[\\/]/).pop() ?? "No file selected"}</span>
+                <span class="truncate text-sm">{player.playback.audioPath?.split(/[\\/]/).pop() ?? "No file selected"}</span>
               </div>
-              {#if sasayaki.hasAudio}
+              {#if player.hasAudio}
                 <div class="flex items-center justify-center gap-3 text-base-content/60 {vertical ? '-scale-x-100' : ''}">
-                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => sasayaki.skip(false)}>
+                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => player.skip(false)}>
                     <RotateCcw class="size-4" />
                   </button>
-                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => sasayaki.prevCue()}>
+                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => player.prevCue()}>
                     <Rewind class="size-4" />
                   </button>
                   <button
                     class="btn btn-circle border-0 bg-base-content text-base-100 {vertical ? '-scale-x-100' : ''}"
-                    onclick={() => sasayaki.togglePlayback()}
+                    onclick={() => player.togglePlayback()}
                   >
-                    {#if sasayaki.isPlaying}
+                    {#if player.isPlaying}
                       <Pause class="size-4" fill="currentColor" />
                     {:else}
                       <Play class="size-4" fill="currentColor" />
                     {/if}
                   </button>
-                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => sasayaki.nextCue()}>
+                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => player.nextCue()}>
                     <FastForward class="size-4" />
                   </button>
-                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => sasayaki.skip(true)}>
+                  <button class="btn btn-ghost btn-sm btn-square" onclick={() => player.skip(true)}>
                     <RotateCw class="size-4" />
                   </button>
                 </div>
                 <div class="flex flex-col gap-1">
-                  {#key sasayaki.duration}
+                  {#key player.duration}
                     <input
                       type="range"
                       class="range range-xs text-primary"
                       min="0"
-                      max={sasayaki.duration}
+                      max={player.duration}
                       step="0.1"
-                      value={sasayaki.currentTime}
-                      oninput={(e) => sasayaki.scrub(Number(e.currentTarget.value))}
+                      value={player.currentTime}
+                      oninput={(e) => player.scrub(Number(e.currentTarget.value))}
                     />
                   {/key}
                   <div class="flex justify-between text-xs tabular-nums text-base-content/60">
-                    <span>{formatTime(sasayaki.currentTime)}</span>
-                    <span>−{formatTime(Math.max(sasayaki.duration - sasayaki.currentTime, 0))}</span>
+                    <span>{formatTime(player.currentTime)}</span>
+                    <span>−{formatTime(Math.max(player.duration - player.currentTime, 0))}</span>
                   </div>
                 </div>
               {/if}
             </div>
           </div>
-          {#if sasayaki.errorMessage}
-            <span class="select-text text-sm text-error">{sasayaki.errorMessage}</span>
+          {#if player.errorMessage}
+            <span class="select-text text-sm text-error">{player.errorMessage}</span>
           {/if}
 
           <SettingGroup>
             <SettingSlider
               label="Delay"
               compact
-              value={sasayaki.delay}
-              display={`${sasayaki.delay >= 0 ? "+" : ""}${sasayaki.delay.toFixed(2)}s`}
+              value={player.delay}
+              display={`${player.delay >= 0 ? "+" : ""}${player.delay.toFixed(2)}s`}
               min={-4}
               max={4}
               step={0.05}
-              onchange={(value) => sasayaki.setDelay(value)}
+              onchange={(value) => player.setDelay(value)}
             />
             <SettingSlider
               label="Speed"
               compact
-              value={sasayaki.rate}
-              display={`${sasayaki.rate.toFixed(2)}x`}
+              value={player.rate}
+              display={`${player.rate.toFixed(2)}x`}
               min={0.5}
               max={3}
               step={0.05}
-              onchange={(value) => sasayaki.setRate(value)}
+              onchange={(value) => player.setRate(value)}
             />
             <SettingSlider
               label="Volume"
               compact
-              value={sasayaki.volume}
-              display={`${Math.round(sasayaki.volume * 100)}%`}
+              value={player.volume}
+              display={`${Math.round(player.volume * 100)}%`}
               min={0}
               max={1}
               step={0.05}
-              onchange={(value) => sasayaki.setVolume(value)}
+              onchange={(value) => player.setVolume(value)}
             />
           </SettingGroup>
 
