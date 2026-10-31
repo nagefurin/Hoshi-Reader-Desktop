@@ -52,9 +52,10 @@
   import TtsPanel from "./TtsPanel.svelte";
   import SettingGroup from "./SettingGroup.svelte";
   import SettingSlider from "./SettingSlider.svelte";
+  import SettingToggle from "./SettingToggle.svelte";
   import { infoColor, readerBackground, readerTextColor, resolvedScheme } from "./theme.svelte";
-  import { sasayakiConfig } from "./sasayakiConfig.svelte";
-  import { ttsConfig } from "./ttsConfig.svelte";
+  import { sasayakiConfig, saveSasayakiConfig } from "./sasayakiConfig.svelte";
+  import { ttsConfig, saveTtsConfig } from "./ttsConfig.svelte";
   import { SasayakiPlayer } from "./sasayakiPlayer.svelte";
   import MatchDialog from "./MatchDialog.svelte";
   import { dictConfig } from "./dictConfig.svelte";
@@ -243,29 +244,68 @@
     );
   }
 
-  const sasayaki = (() =>
-    sasayakiConfig.enableSasayaki
-      ? new SasayakiPlayer(
-          id,
-          {
-            highlightCue: (cueId, reveal) =>
-              postToFrame({ hoshi: "sasayaki-highlight", id: cueId, reveal }),
-            clearCue: () => postToFrame({ hoshi: "sasayaki-clear" }),
-            scrollToImage: (chapterIndex, imageIndex) =>
-              postToFrame({ hoshi: "sasayaki-image", spine: chapterIndex, index: imageIndex }),
-          },
-          (chapterIndex) => navigateTo(chapterIndex, sasayakiCueProgress(chapterIndex) ?? 0),
-          (chapterIndex) => continuous || chapterIndex === index,
-          {
-            title,
-            cover: cover ? schemeUrl("cover", id) : null,
-            chapter: (cue) => {
-              const character = (bookInfo.chapterInfo[spine[cue.chapterIndex]]?.currentTotal ?? 0) + cue.start;
-              return toc.findLast((item) => (chapterChars(item) ?? Infinity) <= character)?.label ?? null;
-            },
-          },
-        )
-      : null)();
+  function createSasayakiPlayer() {
+    return new SasayakiPlayer(
+      id,
+      {
+        highlightCue: (cueId, reveal) =>
+          postToFrame({ hoshi: "sasayaki-highlight", id: cueId, reveal }),
+        clearCue: () => postToFrame({ hoshi: "sasayaki-clear" }),
+        scrollToImage: (chapterIndex, imageIndex) =>
+          postToFrame({ hoshi: "sasayaki-image", spine: chapterIndex, index: imageIndex }),
+      },
+      (chapterIndex) => navigateTo(chapterIndex, sasayakiCueProgress(chapterIndex) ?? 0),
+      (chapterIndex) => continuous || chapterIndex === index,
+      {
+        title,
+        cover: cover ? schemeUrl("cover", id) : null,
+        chapter: (cue) => {
+          const character = (bookInfo.chapterInfo[spine[cue.chapterIndex]]?.currentTotal ?? 0) + cue.start;
+          return toc.findLast((item) => (chapterChars(item) ?? Infinity) <= character)?.label ?? null;
+        },
+      },
+    );
+  }
+
+  let sasayaki = $state.raw<SasayakiPlayer | null>(
+    sasayakiConfig.enableSasayaki ? createSasayakiPlayer() : null,
+  );
+
+  async function setSasayakiEnabled(enabled: boolean) {
+    sasayakiConfig.enableSasayaki = enabled;
+    saveSasayakiConfig();
+
+    if (enabled) {
+      ttsConfig.enableTts = false;
+      saveTtsConfig();
+      if (!sasayaki) {
+        const player = createSasayakiPlayer();
+        sasayaki = player;
+        try {
+          await player.load();
+        } catch (error) {
+          console.warn("Could not initialize Sasayaki in the reader.", error);
+        }
+        if (sasayaki === player && !bookDeleted) pushFrame();
+        else player.dispose();
+      }
+      return;
+    }
+
+    const player = sasayaki;
+    sasayaki = null;
+    wasPaused = false;
+    player?.dispose();
+    pushFrame();
+  }
+
+  function setTtsEnabled(enabled: boolean) {
+    ttsConfig.enableTts = enabled;
+    saveTtsConfig();
+    if (enabled && sasayakiConfig.enableSasayaki) {
+      void setSasayakiEnabled(false);
+    }
+  }
 
   let matchDialog = $state<ReturnType<typeof MatchDialog>>();
 
@@ -1926,8 +1966,7 @@
           <ChartLine class="size-4" />
         </button>
 
-        {#if sasayaki}
-          <button
+        <button
             class="btn btn-ghost btn-sm btn-square {readerPanel === 'Sasayaki'
               ? 'btn-active text-primary'
               : 'text-base-content/60'}"
@@ -1936,8 +1975,6 @@
           >
             <AudioLines class="size-4" />
           </button>
-        {/if}
-        {#if ttsConfig.enableTts}
         <button
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS'
             ? 'btn-active text-primary'
@@ -1947,7 +1984,6 @@
         >
           <Volume2 class="size-4" />
         </button>
-        {/if}
         <button
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'Appearance'
             ? 'btn-active text-primary'
@@ -2470,23 +2506,40 @@
         </div>
       {/if}
 
-      {#if side === "right" && ttsConfig.enableTts}
+      {#if side === "right"}
         <div class="min-h-0 flex-1 flex-col {panel === 'TTS' ? 'flex' : 'hidden'}">
-          <TtsPanel
-            {id}
-            {title}
-            currentChapterIndex={index}
-            currentCharacterCount={currentChar}
-            currentChapterCharacterStart={bookInfo.chapterInfo[spine[index]]?.currentTotal ?? 0}
-            lookupActive={popups.length > 0}
-            continuousMode={continuous}
-            bind:sessionActive={ttsSessionActive}
-            bind:playing={ttsPlaying}
-            onControlApi={registerTtsControls}
-            onReadSegment={onTtsReadSegment}
-            onHoldImages={holdTtsImages}
-            onClearHighlight={clearTtsHighlight}
-          />
+          {#if panel === "TTS"}
+            <div class="shrink-0 border-b border-base-300 px-4 py-3">
+              <SettingToggle
+                compact
+                label="Enable"
+                bind:checked={ttsConfig.enableTts}
+                onchange={() => setTtsEnabled(ttsConfig.enableTts)}
+              />
+              <p class="mt-2 text-xs text-base-content/60">Enabling TTS automatically disables Sasayaki.</p>
+            </div>
+          {/if}
+          {#if ttsConfig.enableTts}
+            <TtsPanel
+              {id}
+              {title}
+              currentChapterIndex={index}
+              currentCharacterCount={currentChar}
+              currentChapterCharacterStart={bookInfo.chapterInfo[spine[index]]?.currentTotal ?? 0}
+              lookupActive={popups.length > 0}
+              continuousMode={continuous}
+              bind:sessionActive={ttsSessionActive}
+              bind:playing={ttsPlaying}
+              onControlApi={registerTtsControls}
+              onReadSegment={onTtsReadSegment}
+              onHoldImages={holdTtsImages}
+              onClearHighlight={clearTtsHighlight}
+            />
+          {:else if panel === "TTS"}
+            <div class="flex flex-1 items-center justify-center p-6 text-center text-sm text-base-content/60">
+              Enable TTS to use speech playback and export TTS audio to Anki.
+            </div>
+          {/if}
         </div>
       {/if}
 
@@ -2597,8 +2650,15 @@
           closePopups();
           jumpToCharacter(highlight.character);
         }} />
-      {:else if panel === "Sasayaki" && sasayaki}
+      {:else if panel === "Sasayaki"}
         <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+          <SettingToggle
+            compact
+            label="Enable"
+            bind:checked={sasayakiConfig.enableSasayaki}
+            onchange={() => void setSasayakiEnabled(sasayakiConfig.enableSasayaki)}
+          />
+          {#if sasayaki}
           <div class="card border border-base-300">
             <div class="card-body gap-4 p-3">
               <div class="flex min-w-0 items-center gap-3">
@@ -2701,6 +2761,9 @@
               Match
             </button>
           </div>
+          {:else}
+            <p class="text-sm text-base-content/60">Enable Sasayaki to load audiobook audio, match captions, and export Sasayaki audio to Anki.</p>
+          {/if}
         </div>
       {:else if panel === "Appearance"}
         <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">

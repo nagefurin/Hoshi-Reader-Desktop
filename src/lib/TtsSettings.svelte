@@ -7,7 +7,7 @@
   import SettingToggle from "./SettingToggle.svelte";
   import { sasayakiConfig, saveSasayakiConfig } from "./sasayakiConfig.svelte";
 
-  let { compact = false, bookId = "" }: { compact?: boolean; bookId?: string } = $props();
+  let { compact = false, bookId = "", showEnableToggle = true }: { compact?: boolean; bookId?: string; showEnableToggle?: boolean } = $props();
 
   type TtsVoiceInfo = { id: string; styles: string[]; roles: string[] };
   type SystemVoiceInfo = { voiceURI: string; name: string; lang: string; default: boolean };
@@ -296,19 +296,21 @@
 </script>
 
 <SettingsSection compact={compact} title="Speech Engine">
-  <SettingToggle
-    compact={compact}
-    label="Enable"
-    bind:checked={ttsConfig.enableTts}
-    onchange={() => {
-      if (ttsConfig.enableTts) {
-        sasayakiConfig.enableSasayaki = false;
-        saveSasayakiConfig();
-      }
-      saveTtsConfig();
-    }}
-  />
-  <p class="text-xs text-base-content/60">Enabling TTS automatically disables Sasayaki. Only one sentence-audio source can be enabled at a time.</p>
+  {#if showEnableToggle}
+    <SettingToggle
+      compact={compact}
+      label="Enable"
+      bind:checked={ttsConfig.enableTts}
+      onchange={() => {
+        if (ttsConfig.enableTts) {
+          sasayakiConfig.enableSasayaki = false;
+          saveSasayakiConfig();
+        }
+        saveTtsConfig();
+      }}
+    />
+    <p class="text-xs text-base-content/60">Enabling TTS automatically disables Sasayaki. Only one sentence-audio source can be enabled at a time.</p>
+  {/if}
   <SettingRow compact={compact} label="Provider">
     <select class="select select-sm w-52" value={ttsConfig.engine} onchange={(event) => changeEngine(event.currentTarget.value)}>
       <option value="device">Device / system voice</option>

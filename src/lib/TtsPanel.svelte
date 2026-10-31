@@ -924,7 +924,7 @@
   <details class="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
     <summary class="collapse-title min-h-0 py-3 text-sm font-medium">TTS settings</summary>
     <div class="collapse-content overflow-x-hidden">
-      <TtsSettings compact={true} bookId={id} />
+      <TtsSettings compact={true} bookId={id} showEnableToggle={false} />
     </div>
   </details>
   <p class="text-xs text-base-content/50">The active sentence is highlighted in the book while it is being spoken.</p>
