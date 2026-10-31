@@ -642,7 +642,11 @@
     const slotIndex = Number(content.slotIndex) || 0;
     let ttsAudio: { parts: string[]; format: "mp3" | "wav" } | null = null;
     if (popupAnki?.sasayakiAudioFormats[slotIndex]) {
-      ttsAudio = await ttsControlApi?.synthesizeForAnki(popup.sentence, popup.chapterIndex) ?? null;
+      try {
+        ttsAudio = await ttsControlApi?.synthesizeForAnki(popup.sentence, popup.chapterIndex) ?? null;
+      } catch (error) {
+        console.warn("Could not generate TTS audio for Anki; falling back to Sasayaki audio.", error);
+      }
     }
     return invoke<boolean>("anki_mine", {
       content,
