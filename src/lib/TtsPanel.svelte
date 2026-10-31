@@ -44,11 +44,14 @@
     readerCharacterStart: number;
   };
 
+  type TtsAudioExport = { parts: string[]; format: "mp3" | "wav" };
+
   type TtsControlApi = {
     previous: () => void;
     next: () => void;
     repeat: () => void;
     togglePlayback: () => void;
+    synthesizeForAnki: (sourceText: string, chapterIndex: number) => Promise<TtsAudioExport | null>;
   };
 
   let {
@@ -133,7 +136,7 @@
   });
 
   $effect(() => {
-    onControlApi?.({ previous, next, repeat: repeatCurrent, togglePlayback });
+    onControlApi?.({ previous, next, repeat: repeatCurrent, togglePlayback, synthesizeForAnki });
     return () => onControlApi?.(null);
   });
 
@@ -332,22 +335,26 @@
     return result;
   }
 
-  function synthesisVoice(segment: SpokenSegment): string {
+  function synthesisVoiceForDialogue(dialogue: boolean): string {
     if (ttsConfig.engine.startsWith("custom:")) {
       const source = ttsConfig.customSources.find((item) => item.id === ttsConfig.engine);
-      return segment.dialogue && source?.dialogueVoice ? source.dialogueVoice : (source?.narrationVoice ?? "");
+      return dialogue && source?.dialogueVoice ? source.dialogueVoice : (source?.narrationVoice ?? "");
     }
-    if (ttsConfig.engine === "device") return segment.dialogue && ttsConfig.dialogueVoice ? ttsConfig.dialogueVoice : ttsConfig.voice;
-    if (ttsConfig.engine === "edge") return segment.dialogue ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice) : ttsConfig.edgeVoice;
-    if (ttsConfig.engine === "azure") return segment.dialogue ? (ttsConfig.azureDialogueVoice || ttsConfig.azureVoice) : ttsConfig.azureVoice;
-    if (ttsConfig.engine === "microsoftTranslator") return segment.dialogue
+    if (ttsConfig.engine === "device") return dialogue && ttsConfig.dialogueVoice ? ttsConfig.dialogueVoice : ttsConfig.voice;
+    if (ttsConfig.engine === "edge") return dialogue ? (ttsConfig.edgeDialogueVoice || ttsConfig.edgeVoice) : ttsConfig.edgeVoice;
+    if (ttsConfig.engine === "azure") return dialogue ? (ttsConfig.azureDialogueVoice || ttsConfig.azureVoice) : ttsConfig.azureVoice;
+    if (ttsConfig.engine === "microsoftTranslator") return dialogue
       ? (ttsConfig.microsoftTranslatorDialogueVoice || ttsConfig.microsoftTranslatorVoice)
       : ttsConfig.microsoftTranslatorVoice;
-    if (ttsConfig.engine === "googleCloud") return segment.dialogue
+    if (ttsConfig.engine === "googleCloud") return dialogue
       ? (ttsConfig.googleCloudDialogueVoice || ttsConfig.googleCloudVoice)
       : ttsConfig.googleCloudVoice;
     if (ttsConfig.engine === "googleTranslate") return "ja";
     return "ja";
+  }
+
+  function synthesisVoice(segment: SpokenSegment): string {
+    return synthesisVoiceForDialogue(segment.dialogue);
   }
 
   function synthesisFingerprint(): string {
@@ -413,6 +420,76 @@
     });
     audioCache.set(segmentIndex, { fingerprint, promise });
     return promise;
+  }
+
+  async function synthesizeForAnki(sourceText: string, chapterIndex: number): Promise<TtsAudioExport | null> {
+    const requestedText = sourceText.trim();
+    if (!requestedText) return null;
+
+    const engine = ttsConfig.engine;
+    // Web Speech API can play system voices but does not expose the generated audio.
+    // On Windows, use the native synthesizer which returns an exportable WAV stream.
+    if (engine === "device" && !usesNativeWindowsSpeech) return null;
+
+    let chapter = chapters.find((item) => item.spineIndex === chapterIndex);
+    if (!chapter) {
+      const loaded = await invoke<TtsChapter[]>("tts_load_text", {
+        id,
+        useRubyReadings: ttsConfig.useRubyReadings,
+      });
+      chapters = loaded;
+      chapter = loaded.find((item) => item.spineIndex === chapterIndex);
+    }
+
+    // Reuse the reader's EPUB segmentation, pronunciation replacements, ruby readings,
+    // and dialogue-voice routing when the popup sentence matches a reader segment.
+    const matchedSegment = chapter
+      ? buildSegments([chapter], chapterIndex).find((segment) => segment.sourceText.trim() === requestedText)
+      : undefined;
+    const dialogue = matchedSegment?.dialogue ?? false;
+    const text = matchedSegment?.text ?? speakableSegment(requestedText, []);
+    if (!text.trim()) return null;
+
+    const customSource = ttsConfig.customSources.find((source) => source.id === engine) ?? null;
+    const customKey = ttsRuntime.customKeys[engine] ?? "";
+    const voice = synthesisVoiceForDialogue(dialogue);
+    const baseUrl = engine === "azure" ? ttsConfig.azureRegion : "";
+    const apiKey = engine === "azure"
+      ? ttsRuntime.azureKey
+      : engine === "googleCloud"
+        ? ttsRuntime.googleCloudKey
+        : "";
+    const configuredRate = Number(customSource?.rate ?? ttsConfig.rate) || 1;
+    const rate = engine === "device" && usesNativeWindowsSpeech
+      ? Math.min(3, Math.max(0.5, configuredRate * (Number(ttsConfig.playbackRate) || 1)))
+      : configuredRate;
+    const pitch = Number(ttsConfig.pitch) || 0;
+    const options = ttsConfig.providerOptions[engine] ?? ttsConfig.providerOptions.edge;
+    const encodedParts: string[] = [];
+
+    for (const part of splitTtsSynthesisText(text, engine)) {
+      encodedParts.push(await invoke<string>("tts_synthesize", {
+        engine: engine === "device" && usesNativeWindowsSpeech ? "system" : engine,
+        text: part,
+        baseUrl,
+        apiKey,
+        voice,
+        rate,
+        pitch,
+        options,
+        customSource,
+        customKey,
+      }));
+    }
+
+    const format = engine === "device" && usesNativeWindowsSpeech
+      ? "wav"
+      : engine.startsWith("custom:")
+        ? (customSource?.format ?? "mp3")
+        : ["azure", "microsoftTranslator", "googleCloud"].includes(engine)
+          ? (ttsConfig.providerOptions[engine]?.format ?? "mp3")
+          : "mp3";
+    return { parts: encodedParts, format };
   }
 
   function prefetchAhead(segmentIndex: number) {

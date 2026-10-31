@@ -136,6 +136,7 @@
     next: () => void;
     repeat: () => void;
     togglePlayback: () => void;
+    synthesizeForAnki: (sourceText: string, chapterIndex: number) => Promise<{ parts: string[]; format: "mp3" | "wav" } | null>;
   };
   let ttsControlApi = $state<TtsControlApi | null>(null);
   let ttsSessionActive = $state(false);
@@ -449,6 +450,7 @@
     sasayakiCue: SasayakiMatch | null;
     sentence: string;
     clozeOffset: number | null;
+    chapterIndex: number;
   };
 
   let marker = $state<{ x: number; y: number; inset: number } | null>(null);
@@ -571,6 +573,7 @@
         sasayakiCue: cue,
         sentence,
         clozeOffset: offset,
+        chapterIndex,
       },
     ];
     if (sasayaki?.isPlaying) {
@@ -615,6 +618,7 @@
         sasayakiCue: null,
         sentence: sentence ?? popups[index].sentence,
         clozeOffset: sentence !== null ? offset : popups[index].clozeOffset,
+        chapterIndex: popups[index].chapterIndex,
       },
     ];
     return [...response.entries[0].matched].length;
@@ -634,7 +638,12 @@
     return invoke<KanjiResponse | null>("lookup_kanji", { character });
   }
 
-  function mineEntry(content: MineContent, popup: PopupInstance): Promise<boolean> {
+  async function mineEntry(content: MineContent, popup: PopupInstance): Promise<boolean> {
+    const slotIndex = Number(content.slotIndex) || 0;
+    let ttsAudio: { parts: string[]; format: "mp3" | "wav" } | null = null;
+    if (popupAnki?.sasayakiAudioFormats[slotIndex]) {
+      ttsAudio = await ttsControlApi?.synthesizeForAnki(popup.sentence, popup.chapterIndex) ?? null;
+    }
     return invoke<boolean>("anki_mine", {
       content,
       context: {
@@ -644,8 +653,10 @@
         bookId: id,
         sasayakiCue: popup.sasayakiCue?.id ?? null,
         sasayakiAudioFormat: sasayakiConfig.sasayakiAudioFormat,
+        ttsAudioParts: ttsAudio?.parts ?? [],
+        ttsAudioFormat: ttsAudio?.format ?? null,
       },
-      slotIndex: Number(content.slotIndex) || 0,
+      slotIndex,
     });
   }
 

@@ -583,11 +583,11 @@
           type="range"
           min={ttsConfig.engine === "googleCloud" ? 0.25 : 0.5}
           max={["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine) ? 2 : 3}
-          step={0.1}
+          step={0.05}
           bind:value={ttsConfig.rate}
           oninput={save}
         />
-        <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.rate).toFixed(1)}x</span>
+        <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.rate).toFixed(2)}x</span>
       </div>
     {/if}
   </SettingRow>

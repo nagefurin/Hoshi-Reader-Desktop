@@ -196,6 +196,7 @@ export type PopupAnkiConfig = {
   cardFormatCount: number;
   validFormatFlags: boolean[];
   cardFormatIcons: string[];
+  sasayakiAudioFormats: boolean[];
   excludedDictionaries: string[];
   needsAudio: boolean;
   audioSources: AudioSource[];

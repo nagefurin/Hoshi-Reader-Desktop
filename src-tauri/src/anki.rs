@@ -280,6 +280,10 @@ pub struct MiningContext {
     pub sasayaki_cue: Option<String>,
     #[serde(default)]
     pub sasayaki_audio_format: SasayakiAudioFormat,
+    #[serde(default)]
+    pub tts_audio_parts: Vec<String>,
+    #[serde(default)]
+    pub tts_audio_format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -509,6 +513,7 @@ pub struct PopupAnkiConfig {
     card_format_count: usize,
     valid_format_flags: Vec<bool>,
     card_format_icons: Vec<String>,
+    sasayaki_audio_formats: Vec<bool>,
     excluded_dictionaries: Vec<String>,
     needs_audio: bool,
     audio_sources: Vec<AudioSource>,
@@ -531,6 +536,9 @@ pub fn anki_config(app: AppHandle) -> PopupAnkiConfig {
         },
         valid_format_flags: valid_format_flags(&config),
         card_format_icons: config.card_formats.iter().map(|f| f.icon.clone()).collect(),
+        sasayaki_audio_formats: config.card_formats.iter().map(|format| {
+            format.field_mappings.values().any(|mapping| mapping == "{sasayaki-audio}")
+        }).collect(),
         excluded_dictionaries: dict::term_dict_categories(&app)
             .into_iter()
             .filter(|(_, c)| *c == dict::DictionaryCategory::Exclude)
@@ -920,30 +928,54 @@ pub async fn anki_mine(
         }
     }
 
-    if !sasayaki_audio_fields.is_empty()
-        && let (Some(book_id), Some(cue_id)) = (&context.book_id, &context.sasayaki_cue)
-    {
-        let app_clone = app.clone();
-        let book_id = book_id.clone();
-        let cue_id = cue_id.clone();
-        let sentence = context.sentence.clone();
-        let format = context.sasayaki_audio_format;
-        let bytes = tauri::async_runtime::spawn_blocking(move || {
-            sasayaki::cue_sentence_audio(&app_clone, &book_id, &cue_id, &sentence, format)
-        })
-        .await
-        .ok()
-        .flatten();
-        if let Some(bytes) = bytes {
-            let data = base64(&bytes);
-            let extension = match format {
-                SasayakiAudioFormat::Mp3 => "mp3",
-                SasayakiAudioFormat::Opus => "ogg",
-            };
-            let filename = format!("hoshi_sasayaki_{}.{extension}", sha1_hex(&bytes));
-            audio_media.push(
-                json!({ "data": data, "filename": filename, "fields": sasayaki_audio_fields }),
-            );
+    if !sasayaki_audio_fields.is_empty() {
+        let extension = context.tts_audio_format.as_deref()
+            .filter(|format| matches!(*format, "mp3" | "wav"));
+        let mut tts_audio_added = false;
+        if let Some(extension) = extension {
+            for encoded in &context.tts_audio_parts {
+                let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+                    continue;
+                };
+                if bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 {
+                    continue;
+                }
+                let data = base64(&bytes);
+                let filename = format!("hoshi_tts_{}.{extension}", sha1_hex(&bytes));
+                audio_media.push(
+                    json!({ "data": data, "filename": filename, "fields": sasayaki_audio_fields.clone() }),
+                );
+                tts_audio_added = true;
+            }
+        }
+
+        // Prefer TTS audio when it can be exported; keep the original Sasayaki
+        // clip as a fallback for unsupported system voices or unavailable TTS audio.
+        if !tts_audio_added
+            && let (Some(book_id), Some(cue_id)) = (&context.book_id, &context.sasayaki_cue)
+        {
+            let app_clone = app.clone();
+            let book_id = book_id.clone();
+            let cue_id = cue_id.clone();
+            let sentence = context.sentence.clone();
+            let format = context.sasayaki_audio_format;
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                sasayaki::cue_sentence_audio(&app_clone, &book_id, &cue_id, &sentence, format)
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(bytes) = bytes {
+                let data = base64(&bytes);
+                let extension = match format {
+                    SasayakiAudioFormat::Mp3 => "mp3",
+                    SasayakiAudioFormat::Opus => "ogg",
+                };
+                let filename = format!("hoshi_sasayaki_{}.{extension}", sha1_hex(&bytes));
+                audio_media.push(
+                    json!({ "data": data, "filename": filename, "fields": sasayaki_audio_fields.clone() }),
+                );
+            }
         }
     }
 
