@@ -59,7 +59,7 @@
         {#if syncIsSyncing}
           <span class="loading loading-spinner loading-sm"></span>
         {:else}
-          <CloudUpload class="size-6 opacity-65" />
+          <CloudUpload class="size-6 opacity-55" />
         {/if}
       </button>
     </li>
