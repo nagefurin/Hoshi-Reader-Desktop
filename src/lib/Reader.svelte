@@ -2001,7 +2001,7 @@
           class="btn btn-ghost btn-sm btn-square {readerPanel === 'TTS' || ttsConfig.enableTts
             ? 'btn-active text-primary'
             : 'text-base-content/60'}"
-          title="TTS"
+          title="Tts"
           onclick={() => openReaderPanel(readerPanel === "TTS" ? null : "TTS")}
         >
           <Volume2 class="size-4" />
@@ -2196,7 +2196,7 @@
           </button>
           {@render transportButton(FastForward, () => ttsControlApi?.next())}
         </div>
-        <span class="ml-1 whitespace-nowrap text-[10px] font-medium">TTS</span>
+        <span class="ml-1 whitespace-nowrap text-[10px] font-medium">Tts</span>
       </div>
     {/snippet}
 
@@ -2502,7 +2502,7 @@
         style={macChrome ? "padding-top: 2.0625rem" : ""}
         class="flex shrink-0 items-center justify-between border-b border-base-300 px-4 py-2.5"
       >
-        <h2 class="text-sm font-semibold">{panel}</h2>
+        <h2 class="text-sm font-semibold">{panel === "TTS" ? "Tts" : panel}</h2>
         <button
           class="btn btn-ghost btn-sm btn-square"
           onclick={() => openReaderPanel(null)}

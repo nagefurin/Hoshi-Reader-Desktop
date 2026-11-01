@@ -7,7 +7,7 @@
     ["syncing", "Syncing"],
     ["input", "Input"],
     ["sasayaki", "Sasayaki"],
-    ["tts", "TTS"],
+    ["tts", "Tts"],
     ["backup", "Backup"],
     ["about", "About"],
   ] as const;

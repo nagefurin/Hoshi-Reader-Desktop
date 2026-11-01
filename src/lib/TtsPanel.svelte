@@ -860,7 +860,7 @@
   <div class="flex items-start gap-3">
     <div class="rounded-box bg-primary/10 p-2 text-primary"><AudioLines class="size-5" /></div>
     <div class="min-w-0 flex-1">
-      <p class="text-sm font-semibold">TTS</p>
+      <p class="text-sm font-semibold">Tts</p>
       <p class="line-clamp-2 text-xs text-base-content/60">{title}</p>
       <p class="mt-1 text-xs text-base-content/60">
         {ttsConfig.engine === "device" ? "System voice" :
@@ -922,7 +922,7 @@
     </div>
   {/if}
   <details class="collapse collapse-arrow rounded-box border border-base-300 bg-base-100">
-    <summary class="collapse-title min-h-0 py-3 text-sm font-medium">TTS settings</summary>
+    <summary class="collapse-title min-h-0 py-3 text-sm font-medium">Tts settings</summary>
     <div class="collapse-content overflow-x-hidden">
       <TtsSettings compact={true} bookId={id} showEnableToggle={false} />
     </div>

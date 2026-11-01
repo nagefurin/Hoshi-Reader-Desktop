@@ -309,9 +309,10 @@
         saveTtsConfig();
       }}
     />
-    <p class="text-xs text-base-content/60">Enabling TTS automatically disables Sasayaki. Only one sentence-audio source can be enabled at a time.</p>
   {/if}
-  <SettingRow compact={compact} label="Provider">
+  {#if ttsConfig.enableTts}
+    <p class="text-xs text-base-content/60">Enabling TTS automatically disables Sasayaki. Only one sentence-audio source can be enabled at a time.</p>
+    <SettingRow compact={compact} label="Provider">
     <select class="select select-sm w-52" value={ttsConfig.engine} onchange={(event) => changeEngine(event.currentTarget.value)}>
       <option value="device">Device / system voice</option>
       <option value="edge">Microsoft Edge (online)</option>
@@ -387,12 +388,14 @@
       </div>
     </SettingRow>
     <SettingRow compact={compact} label="Dialogue Voice">
-      <select class="select select-sm w-52" bind:value={ttsConfig.edgeDialogueVoice} onchange={save}>
+      <div class="flex max-w-lg flex-1">
+        <select class="select select-sm w-full" bind:value={ttsConfig.edgeDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
         {#each edgeVoices as voice (voice.id)}
           <option value={voice.id}>{voice.id}</option>
         {/each}
-      </select>
+        </select>
+      </div>
     </SettingRow>
     {#if edgeVoiceError}
       <p class="text-xs text-error">{edgeVoiceError}</p>
@@ -415,10 +418,12 @@
       </div>
     </SettingRow>
     <SettingRow compact={compact} label="Dialogue Voice">
-      <select class="select select-sm w-52" bind:value={ttsConfig.azureDialogueVoice} onchange={save}>
+      <div class="flex max-w-lg flex-1">
+        <select class="select select-sm w-full" bind:value={ttsConfig.azureDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
         {#each azureVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
-      </select>
+        </select>
+      </div>
     </SettingRow>
     {#if azureVoiceError}<p class="text-xs text-error">{azureVoiceError}</p>{/if}
   {:else if ttsConfig.engine === "microsoftTranslator"}
@@ -432,10 +437,12 @@
       </div>
     </SettingRow>
     <SettingRow compact={compact} label="Dialogue Voice">
-      <select class="select select-sm w-52" bind:value={ttsConfig.microsoftTranslatorDialogueVoice} onchange={save}>
+      <div class="flex max-w-lg flex-1">
+        <select class="select select-sm w-full" bind:value={ttsConfig.microsoftTranslatorDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
         {#each translatorVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
-      </select>
+        </select>
+      </div>
     </SettingRow>
     {#if translatorVoiceError}<p class="text-xs text-error">{translatorVoiceError}</p>{/if}
     <p class="text-xs text-base-content/60">Uses Microsoft's Translator mobile-client service. Availability and access can change.</p>
@@ -453,17 +460,21 @@
       </div>
     </SettingRow>
     <SettingRow compact={compact} label="Dialogue Voice">
-      <select class="select select-sm w-52" bind:value={ttsConfig.googleCloudDialogueVoice} onchange={save}>
+      <div class="flex max-w-lg flex-1">
+        <select class="select select-sm w-full" bind:value={ttsConfig.googleCloudDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
         {#each googleCloudVoices as voice (voice.id)}<option value={voice.id}>{voice.id}</option>{/each}
-      </select>
+        </select>
+      </div>
     </SettingRow>
     {#if googleCloudVoiceError}<p class="text-xs text-error">{googleCloudVoiceError}</p>{/if}
   {:else if ttsConfig.engine === "googleTranslate"}
     <p class="text-xs text-base-content/60">Google Translate uses its default Japanese voice. It has no voice selector or API key.</p>
   {/if}
+  {/if}
 </SettingsSection>
 
+{#if ttsConfig.enableTts}
 <TtsCustomSources compact={compact} />
 
 {#if !["device", "googleTranslate"].includes(ttsConfig.engine) && !ttsConfig.engine.startsWith("custom:")}
@@ -739,3 +750,4 @@
     <button class="btn btn-outline btn-sm" onclick={addReplacement}>Add dictionary rule</button>
   </div>
 </SettingsSection>
+{/if}
