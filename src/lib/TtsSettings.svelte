@@ -309,7 +309,6 @@
         saveTtsConfig();
       }}
     />
-    <p class="text-xs text-base-content/60">Enabling TTS automatically disables Sasayaki. Only one sentence-audio source can be enabled at a time.</p>
   </SettingsSection>
 {/if}
 
@@ -334,7 +333,7 @@
   </SettingRow>
 
   {#if ttsConfig.engine === "device"}
-    <SettingRow compact={compact} label="Narration Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Narration Voice" labelWidth="6.75rem">
       <select class="select select-sm w-52" bind:value={ttsConfig.voice} onchange={save}>
         <option value="">Automatic Japanese voice</option>
         {#each voices as voice (voice.voiceURI)}
@@ -342,7 +341,7 @@
         {/each}
       </select>
     </SettingRow>
-    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="6.75rem">
       <select class="select select-sm w-52" bind:value={ttsConfig.dialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
         {#each voices as voice (voice.voiceURI)}
@@ -375,7 +374,7 @@
       </div>
     {/if}
   {:else if ttsConfig.engine === "edge"}
-    <SettingRow compact={compact} label="Narration Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Narration Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" value={ttsConfig.edgeVoice} onchange={(event) => selectVoice("edgeVoice", event.currentTarget.value)}>
           {#if edgeVoices.length === 0}
@@ -390,7 +389,7 @@
         </button>
       </div>
     </SettingRow>
-    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.edgeDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
@@ -412,7 +411,7 @@
     <SettingRow compact={compact} label="Subscription Key">
       <input class="input input-sm w-full max-w-lg" type="password" autocomplete="off" bind:value={ttsRuntime.azureKey} placeholder="Azure Speech key (session only)" />
     </SettingRow>
-    <SettingRow compact={compact} label="Narration Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Narration Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" value={ttsConfig.azureVoice} onchange={(event) => selectVoice("azureVoice", event.currentTarget.value)}>
           {#if azureVoices.length === 0}<option value={ttsConfig.azureVoice}>{ttsConfig.azureVoice}</option>{/if}
@@ -421,7 +420,7 @@
         <button class="btn btn-outline btn-sm w-[4.5rem] shrink-0" onclick={refreshAzureVoices} disabled={azureVoiceLoading}>{azureVoiceLoading ? "Loading…" : "Refresh"}</button>
       </div>
     </SettingRow>
-    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.azureDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
@@ -432,7 +431,7 @@
     </SettingRow>
     {#if azureVoiceError}<p class="text-xs text-error">{azureVoiceError}</p>{/if}
   {:else if ttsConfig.engine === "microsoftTranslator"}
-    <SettingRow compact={compact} label="Narration Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Narration Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" value={ttsConfig.microsoftTranslatorVoice} onchange={(event) => selectVoice("microsoftTranslatorVoice", event.currentTarget.value)}>
           {#if translatorVoices.length === 0}<option value={ttsConfig.microsoftTranslatorVoice}>{ttsConfig.microsoftTranslatorVoice}</option>{/if}
@@ -441,7 +440,7 @@
         <button class="btn btn-outline btn-sm w-[4.5rem] shrink-0" onclick={refreshTranslatorVoices} disabled={translatorVoiceLoading}>{translatorVoiceLoading ? "Loading…" : "Refresh"}</button>
       </div>
     </SettingRow>
-    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.microsoftTranslatorDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
@@ -456,7 +455,7 @@
     <SettingRow compact={compact} label="API Key">
       <input class="input input-sm w-full max-w-lg" type="password" autocomplete="off" bind:value={ttsRuntime.googleCloudKey} placeholder="Google Cloud key (session only)" />
     </SettingRow>
-    <SettingRow compact={compact} label="Narration Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Narration Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" value={ttsConfig.googleCloudVoice} onchange={(event) => selectVoice("googleCloudVoice", event.currentTarget.value)}>
           {#if googleCloudVoices.length === 0}<option value={ttsConfig.googleCloudVoice}>{ttsConfig.googleCloudVoice}</option>{/if}
@@ -465,7 +464,7 @@
         <button class="btn btn-outline btn-sm w-[4.5rem] shrink-0" onclick={refreshGoogleCloudVoices} disabled={googleCloudVoiceLoading}>{googleCloudVoiceLoading ? "Loading…" : "Refresh"}</button>
       </div>
     </SettingRow>
-    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="7rem">
+    <SettingRow compact={compact} label="Dialogue Voice" labelWidth="6.75rem">
       <div class="flex max-w-lg flex-1 items-center gap-2">
         <select class="select select-sm min-w-0 flex-1" bind:value={ttsConfig.googleCloudDialogueVoice} onchange={save}>
         <option value="">Same as narration</option>
