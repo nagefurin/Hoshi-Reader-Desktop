@@ -13,6 +13,11 @@ export const network = $state({ online: navigator.onLine });
 
 export const attachPrompt = $state({ dismissed: false });
 
+export function syncNow() {
+  attachPrompt.dismissed = false;
+  return invoke("gdrive_sync_now");
+}
+
 export function configureSync() {
   return invoke("sync_configure", {
     settings: {

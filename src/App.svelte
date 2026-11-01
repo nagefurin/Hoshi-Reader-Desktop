@@ -26,6 +26,7 @@
     Bookmark,
     ShelfSource,
     TocItem,
+    GoogleDriveSyncStatus,
   } from "./lib/types";
   import {
     autoUpdateDictionaries,
@@ -39,7 +40,7 @@
     shelves,
   } from "./lib/shelves.svelte";
   import { shellConfig } from "./lib/shellConfig.svelte";
-  import { configureSync, network } from "./lib/syncConfig.svelte";
+  import { configureSync, network, syncConfig, syncNow } from "./lib/syncConfig.svelte";
 
   type OpenedBook = {
     id: string;
@@ -60,6 +61,27 @@
   let source = $state<ShelfSource>({ kind: "home" });
   let settingsTab = $state<SettingsTab>("dictionaries");
   let manageShelves = $state<ReturnType<typeof ManageShelves>>();
+  let syncAuthenticated = $state(false);
+  let syncIsSyncing = $state(false);
+
+  function updateSyncAuthenticated(authenticated: boolean) {
+    syncAuthenticated = authenticated;
+  }
+
+  $effect(() => {
+    invoke<boolean>("sync_authenticated").then((authenticated) => {
+      syncAuthenticated = authenticated;
+    });
+    invoke<GoogleDriveSyncStatus>("gdrive_sync_state").then((status) => {
+      syncIsSyncing = status.isSyncing;
+    });
+    const unlisten = listen<GoogleDriveSyncStatus>("sync://status", ({ payload }) => {
+      syncIsSyncing = payload.isSyncing;
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  });
 
   const hasSource = $derived(view === "books" || view === "settings");
   const bookAuthors = $derived(shellConfig.showAuthors ? authors(books) : []);
@@ -254,7 +276,14 @@
   />
 {:else}
   <div class="flex h-full">
-    <Rail {view} onNavigate={(v) => (view = v)} />
+    <Rail
+      {view}
+      onNavigate={(v) => (view = v)}
+      syncEnabled={syncConfig.enableSync}
+      {syncAuthenticated}
+      {syncIsSyncing}
+      onSyncNow={syncNow}
+    />
 
     {#if hasSource}
       <SourceList>
@@ -336,6 +365,7 @@
             await refresh();
             source = { kind: "home" };
           }}
+          onSyncAuthenticatedChange={updateSyncAuthenticated}
         />
       {/if}
       <div class="absolute inset-0 {view === 'dictionary' ? '' : 'invisible'}" inert={view !== "dictionary"}>

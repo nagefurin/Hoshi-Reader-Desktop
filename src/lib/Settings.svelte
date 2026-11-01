@@ -67,7 +67,7 @@
   import { Sortable } from "./sortable.svelte";
   import { sasayakiConfig, saveSasayakiConfig } from "./sasayakiConfig.svelte";
   import { ttsConfig, saveTtsConfig } from "./ttsConfig.svelte";
-  import { attachPrompt, configureSync, syncConfig, saveSyncConfig, syncProviders } from "./syncConfig.svelte";
+  import { attachPrompt, configureSync, syncConfig, saveSyncConfig, syncProviders, syncNow } from "./syncConfig.svelte";
   import Appearance from "./Appearance.svelte";
   import About from "./About.svelte";
   import { defaultFonts } from "./readerConfig.svelte";
@@ -83,9 +83,11 @@
   let {
     tab,
     onReload,
+    onSyncAuthenticatedChange,
   }: {
     tab: SettingsTab;
     onReload: () => Promise<void>;
+    onSyncAuthenticatedChange: (authenticated: boolean) => void;
   } = $props();
 
   const tabLabel = $derived(settingsTabs.find(([id]) => id === tab)![1]);
@@ -154,6 +156,7 @@
 
   async function refreshSyncStatus() {
     syncAuthenticated = await invoke<boolean>("sync_authenticated");
+    onSyncAuthenticatedChange(syncAuthenticated);
   }
 
   refreshSyncStatus();
@@ -1347,10 +1350,7 @@
                   <button
                     class="btn btn-outline btn-sm"
                     disabled={driveStatus.isSyncing}
-                    onclick={() => {
-                      attachPrompt.dismissed = false;
-                      invoke("gdrive_sync_now");
-                    }}
+                    onclick={syncNow}
                   >
                     Sync Now
                   </button>

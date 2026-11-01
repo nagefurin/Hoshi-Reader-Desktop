@@ -1,14 +1,22 @@
 <script lang="ts">
-  import { BookOpen, ChartLine, LibraryBig, Settings } from "@lucide/svelte";
+  import { BookOpen, ChartLine, CloudUpload, LibraryBig, Settings } from "@lucide/svelte";
   import Titlebar from "./Titlebar.svelte";
   import type { AppView } from "./types";
 
   let {
     view,
     onNavigate,
+    syncEnabled,
+    syncAuthenticated,
+    syncIsSyncing,
+    onSyncNow,
   }: {
     view: AppView;
     onNavigate: (view: AppView) => void;
+    syncEnabled: boolean;
+    syncAuthenticated: boolean;
+    syncIsSyncing: boolean;
+    onSyncNow: () => void;
   } = $props();
 
   const destinations = [
@@ -38,6 +46,23 @@
         </button>
       </li>
     {/each}
+  </ul>
+  <ul class="{menu} pb-1">
+    <li>
+      <button
+        class="{item}"
+        data-tip="Sync Now"
+        disabled={!syncEnabled || !syncAuthenticated || syncIsSyncing}
+        aria-label="Sync Now"
+        onclick={onSyncNow}
+      >
+        {#if syncIsSyncing}
+          <span class="loading loading-spinner loading-sm"></span>
+        {:else}
+          <CloudUpload class="size-6 opacity-65" />
+        {/if}
+      </button>
+    </li>
   </ul>
   <ul class="{menu} pb-2">
     <li>
