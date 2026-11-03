@@ -208,6 +208,8 @@ pub fn run() {
         .setup(|app| {
             library::import_portable_books(app.handle())?;
             #[cfg(windows)]
+            sync::gdrive::manager::migrate_legacy_cache(app.handle());
+            #[cfg(windows)]
             media_controls::set_app_id("de.manhhao.hoshi.nagefurin-fork").ok();
             let builder = tauri::WebviewWindowBuilder::from_config(
                 app.handle(),
