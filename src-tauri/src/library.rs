@@ -333,20 +333,11 @@ pub fn ms_to_apple(ms: i64) -> f64 {
 pub(crate) fn app_dir(app: &AppHandle) -> PathBuf {
     #[cfg(windows)]
     {
-        // Store the fork's native data beside the portable EXE when writable.
-        if let Ok(executable) = std::env::current_exe()
-            && let Some(parent) = executable.parent()
-        {
-            let portable_dir = parent.join("Hoshi-Reader-Fork-data");
-            if fs::create_dir_all(&portable_dir).is_ok() {
-                return portable_dir;
-            }
-        }
-
-        // Fall back to a distinct per-fork directory if the EXE's folder is read-only.
-        let fallback_dir = app.path().app_data_dir().unwrap().join("NagefurinFork");
-        fs::create_dir_all(&fallback_dir).unwrap();
-        fallback_dir
+        // Use the same data root as upstream Hoshi Reader. Only explicitly
+        // nagefurin-prefixed files are fork-specific.
+        let dir = shared_data_dir(app);
+        fs::create_dir_all(&dir).unwrap();
+        dir
     }
     #[cfg(not(windows))]
     {
@@ -372,87 +363,8 @@ fn copy_directory_contents(source: &Path, destination: &Path) -> std::io::Result
     Ok(())
 }
 
-fn copy_directory_once(source: &Path, destination: &Path) -> std::io::Result<()> {
-    if destination.is_dir() || !source.is_dir() {
-        return Ok(());
-    }
-    if destination.exists() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "Portable asset destination exists but is not a directory",
-        ));
-    }
-
-    let name = destination.file_name().and_then(|value| value.to_str()).unwrap_or("assets");
-    let temporary = destination.with_file_name(format!("{name}.{}.importing", uuid::Uuid::new_v4()));
-    if temporary.exists() {
-        fs::remove_dir_all(&temporary)?;
-    }
-    copy_directory_contents(source, &temporary)?;
-    if destination.exists() {
-        fs::remove_dir_all(&temporary)?;
-        return Ok(());
-    }
-    match fs::rename(&temporary, destination) {
-        Ok(()) => Ok(()),
-        Err(_) if destination.is_dir() => {
-            fs::remove_dir_all(&temporary)?;
-            Ok(())
-        }
-        Err(error) => Err(error),
-    }
-}
-
-// Copy original settings at launch, while keeping mutable library and asset data
-// independent so the original app and fork can run side by side.
-pub(crate) fn import_original_settings(app: &AppHandle) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        let original_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(std::io::Error::other)?;
-        let fork_dir = app_dir(app);
-        if original_dir != fork_dir {
-            // Seed local dictionary/font assets once. Updates and deletions from the
-            // fork then affect only its portable data folder.
-            copy_directory_once(&original_dir.join("Dictionaries"), &fork_dir.join("Dictionaries"))?;
-            copy_directory_once(&original_dir.join("Fonts"), &fork_dir.join("Fonts"))?;
-
-            let source = original_dir.join("anki_config.json");
-            if source.is_file() {
-                let contents = fs::read(&source)?;
-                // Don't replace a working fork config with a partial/corrupt source file.
-                if serde_json::from_slice::<serde_json::Value>(&contents).is_ok() {
-                    fs::write(fork_dir.join("anki_config.json"), contents)?;
-                }
-            }
-
-            // Dictionary selections/order are settings; the actual dictionary assets
-            // remain in the original shared directory so both apps can read them.
-            let original_dict_settings = original_dir.join("Dictionaries");
-            let fork_dict_settings = fork_dir.join("DictionarySettings");
-            for name in ["config.json", "collapsed.json"] {
-                let source = original_dict_settings.join(name);
-                if source.is_file() {
-                    let contents = fs::read(&source)?;
-                    if serde_json::from_slice::<serde_json::Value>(&contents).is_ok() {
-                        fs::create_dir_all(&fork_dict_settings)?;
-                        fs::write(fork_dict_settings.join(name), contents)?;
-                    }
-                }
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = app;
-    }
-    Ok(())
-}
-
-/// Shared user data root used by upstream Hoshi Reader on Windows.
-/// Book files/bookmarks are shared; fork preferences and non-book assets remain separate.
+/// Shared data root used by upstream Hoshi Reader on Windows.
+/// Only files explicitly prefixed with `nagefurin-` are fork-specific.
 pub(crate) fn shared_data_dir(app: &AppHandle) -> PathBuf {
     #[cfg(windows)]
     {
