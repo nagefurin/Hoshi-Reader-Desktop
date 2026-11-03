@@ -728,7 +728,7 @@ pub(crate) fn migrate_legacy_cache(app: &AppHandle) {
     let Ok(data) = std::fs::read(&legacy) else {
         return;
     };
-    if sync_format::decode(&data).is_err() {
+    if sync_format::decode::<GoogleDriveSyncCache>(&data).is_err() {
         return;
     }
 
