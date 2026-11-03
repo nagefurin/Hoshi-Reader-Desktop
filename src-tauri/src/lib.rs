@@ -44,7 +44,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_filename(".window-state-nagefurin-fork.json")
+                .with_filename(".window-state.json")
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         & !tauri_plugin_window_state::StateFlags::VISIBLE,
@@ -206,7 +206,6 @@ pub fn run() {
             sync::open_external,
         ])
         .setup(|app| {
-            library::import_original_settings(app.handle())?;
             library::import_portable_books(app.handle())?;
             #[cfg(windows)]
             media_controls::set_app_id("de.manhhao.hoshi.nagefurin-fork").ok();
