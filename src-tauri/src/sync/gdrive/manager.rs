@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::library::{self, BookMetadata};
@@ -347,7 +347,7 @@ pub fn enabled() -> bool {
 }
 
 pub fn init() {
-    migrate_legacy_cache();
+    migrate_legacy_cache(app());
     shared().cache = std::fs::read(cache_url())
         .ok()
         .and_then(|data| sync_format::decode(&data).ok())
@@ -712,8 +712,8 @@ fn cache_url() -> std::path::PathBuf {
 
 // Move the cache from the former portable data directory on first launch.
 // Never overwrite a cache that already exists in the shared Hoshi Reader directory.
-fn migrate_legacy_cache() {
-    let destination = cache_url();
+pub(crate) fn migrate_legacy_cache(app: &AppHandle) {
+    let destination = library::app_dir(app).join("nagefurin-drive-sync.json");
     if destination.exists() {
         return;
     }
