@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const FONT_EXTENSIONS: [&str; 5] = ["ttf", "otf", "ttc", "woff", "woff2"];
 const FONTS_DIR: &str = "Fonts";
