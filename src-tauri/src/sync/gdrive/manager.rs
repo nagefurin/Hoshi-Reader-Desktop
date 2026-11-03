@@ -347,6 +347,7 @@ pub fn enabled() -> bool {
 }
 
 pub fn init() {
+    migrate_legacy_cache();
     shared().cache = std::fs::read(cache_url())
         .ok()
         .and_then(|data| sync_format::decode(&data).ok())
@@ -706,7 +707,39 @@ fn remove_placeholders() -> SyncResult<()> {
 }
 
 fn cache_url() -> std::path::PathBuf {
-    library::app_dir(app()).join("drive-sync.json")
+    library::app_dir(app()).join("nagefurin-drive-sync.json")
+}
+
+// Move the cache from the former portable data directory on first launch.
+// Never overwrite a cache that already exists in the shared Hoshi Reader directory.
+fn migrate_legacy_cache() {
+    let destination = cache_url();
+    if destination.exists() {
+        return;
+    }
+
+    let Ok(executable) = std::env::current_exe() else {
+        return;
+    };
+    let Some(parent) = executable.parent() else {
+        return;
+    };
+    let legacy = parent.join("Hoshi-Reader-Fork-data").join("drive-sync.json");
+    let Ok(data) = std::fs::read(&legacy) else {
+        return;
+    };
+    if sync_format::decode(&data).is_err() {
+        return;
+    }
+
+    if let Some(directory) = destination.parent()
+        && std::fs::create_dir_all(directory).is_err()
+    {
+        return;
+    }
+    if storage::write_atomic(&destination, &data).is_ok() {
+        std::fs::remove_file(legacy).ok();
+    }
 }
 
 pub(super) fn save_cache() -> SyncResult<()> {
