@@ -100,10 +100,6 @@ pub(crate) fn dictionaries_dir(app: &AppHandle) -> PathBuf {
     crate::library::app_dir(app).join(DICTIONARIES_DIR)
 }
 
-fn dictionary_settings_dir(app: &AppHandle) -> PathBuf {
-    crate::library::app_dir(app).join("DictionarySettings")
-}
-
 pub(crate) fn initialize(app: &AppHandle) {
     let root = dictionaries_dir(app);
     fs::create_dir_all(&root).ok();
@@ -115,7 +111,7 @@ pub(crate) fn initialize(app: &AppHandle) {
 
 fn load_config(app: &AppHandle) -> DictConfig {
     let root = dictionaries_dir(app);
-    let mut config = read_json(&dictionary_settings_dir(app).join("config.json")).unwrap_or_default();
+    let mut config = read_json(&dictionaries_dir(app).join("config.json")).unwrap_or_default();
     append_unconfigured(&root, &mut config);
     update_orders(&mut config);
     config
@@ -156,20 +152,20 @@ fn append_unconfigured(root: &Path, config: &mut DictConfig) {
 }
 
 fn config_modified(app: &AppHandle) -> Option<SystemTime> {
-    fs::metadata(dictionary_settings_dir(app).join("config.json"))
+    fs::metadata(dictionaries_dir(app).join("config.json"))
         .and_then(|metadata| metadata.modified())
         .ok()
 }
 
 fn save_config(app: &AppHandle, config: &DictConfig) -> Result<(), String> {
-    let root = dictionary_settings_dir(app);
+    let root = dictionaries_dir(app);
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     write_json(&root.join("config.json"), config)
 }
 
 #[tauri::command]
 pub fn load_collapsed_dictionaries(app: AppHandle) -> Vec<String> {
-    read_json::<Vec<String>>(&dictionary_settings_dir(&app).join(COLLAPSED_FILE)).unwrap_or_default()
+    read_json::<Vec<String>>(&dictionaries_dir(&app).join(COLLAPSED_FILE)).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -180,7 +176,7 @@ pub fn save_collapsed_dictionaries(app: AppHandle, titles: Vec<String>) {
             collapsed.push(title);
         }
     }
-    let root = dictionary_settings_dir(&app);
+    let root = dictionaries_dir(&app);
     if fs::create_dir_all(&root).is_err() {
         return;
     }
@@ -828,7 +824,7 @@ fn updatable_dictionaries(app: &AppHandle, config: &DictConfig) -> Vec<Updatable
 }
 
 fn rename_collapsed_dictionary(app: &AppHandle, old: &str, new: &str) {
-    let path = dictionary_settings_dir(app).join(COLLAPSED_FILE);
+    let path = dictionaries_dir(app).join(COLLAPSED_FILE);
     let Some(mut titles) = read_json::<Vec<String>>(&path) else {
         return;
     };
