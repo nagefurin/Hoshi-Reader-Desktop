@@ -14,6 +14,8 @@
     const textColor = params.get('tc');
     const sasayakiTextColor = params.get('stc');
     const sasayakiBackgroundColor = params.get('sbc');
+    const sasayakiUnderlineColor = params.get('suc');
+    const sasayakiUnderlineThickness = params.get('sut');
 
     const layout = {
         fontSize: Number(params.get('fs')),
@@ -153,6 +155,7 @@
                 margin: 0 !important;
                 padding: 0 !important;
                 color: var(--hoshi-text-color) !important;
+                background-color: transparent !important;
                 writing-mode: ${writingMode} !important;
             }
             html, body {
@@ -201,10 +204,13 @@
                 filter: blur(24px) !important;
                 clip-path: inset(0);
                 transform: translateZ(0);
+            }
+            img.block-img.blurred,
+            svg.blurred image {
                 cursor: pointer;
             }
             img.block-img:not(.blurred),
-            svg:has(image):not(.blurred) {
+            svg:not(.blurred) image {
                 cursor: zoom-in;
             }
             ${dimmedFuriganaCss}
@@ -270,6 +276,8 @@
             .hoshi-sasayaki-cue.hoshi-sasayaki-active {
                 color: var(--hoshi-sasayaki-text-color) !important;
                 background-color: var(--hoshi-sasayaki-background-color) !important;
+                text-decoration: underline var(--hoshi-sasayaki-underline-color) var(--hoshi-sasayaki-underline-thickness) !important;
+                text-underline-position: under right !important;
             }
         `;
     }
@@ -295,6 +303,12 @@
         }
         if (sasayakiBackgroundColor) {
             root.style.setProperty('--hoshi-sasayaki-background-color', sasayakiBackgroundColor);
+        }
+        if (sasayakiUnderlineColor) {
+            root.style.setProperty('--hoshi-sasayaki-underline-color', sasayakiUnderlineColor);
+        }
+        if (sasayakiUnderlineThickness) {
+            root.style.setProperty('--hoshi-sasayaki-underline-thickness', `${sasayakiUnderlineThickness}px`);
         }
         if (textColor) {
             root.style.setProperty('--hoshi-text-color', '#' + textColor);
@@ -593,6 +607,8 @@
             case 'sasayaki-colors':
                 root.style.setProperty('--hoshi-sasayaki-text-color', m.text);
                 root.style.setProperty('--hoshi-sasayaki-background-color', m.background);
+                root.style.setProperty('--hoshi-sasayaki-underline-color', m.underline);
+                root.style.setProperty('--hoshi-sasayaki-underline-thickness', `${m.thickness}px`);
                 break;
             case 'sasayaki-highlight':
                 if (reader.highlightSasayakiCue(m.id, m.reveal)) {

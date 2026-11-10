@@ -9,17 +9,17 @@ use tauri::Emitter;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::highlights::{self, HighlightRecords};
-use crate::library::{self, BookMetadata, Bookmark, DISTANT_PAST, ShelfList};
+use crate::library::{self, BookMetadata, Bookmark, DISTANT_PAST};
 use crate::sasayaki::{self, SasayakiMatchData};
 use crate::statistics::{self, Sessions};
 use crate::sync::app;
 use crate::sync::model::{
     SyncBook, SyncBookmark, SyncFileType, SyncFiles, SyncHighlight, SyncMetadata, SyncPlayback,
-    SyncResult, Timestamped,
+    SyncResult, SyncShelves, Timestamped,
 };
 
 pub const SASAYAKI_MATCH: &str = "sasayaki_match.json";
-const SASAYAKI_TRANSCRIPT: &str = "sasayaki_transcript.json";
+pub const SASAYAKI_TRANSCRIPT: &str = "sasayaki_transcript.json";
 const HIGHLIGHTS: &str = "highlights.json";
 const STATISTICS: &str = "statistics.json";
 const STATISTICS_ARCHIVE: &str = "statistics_archive";
@@ -132,15 +132,18 @@ impl SyncStorage {
     }
 
     pub fn has_data() -> bool {
-        Self::book_directories().iter().any(|root| {
-            if is_archived(root) {
-                statistics::load(root)
-                    .values()
-                    .any(|change| change.value.is_some())
-            } else {
-                library::load_metadata_at(root).is_some_and(|metadata| metadata.epub.is_some())
-            }
-        })
+        library::load_shelf_list(app())
+            .values()
+            .any(|shelf| shelf.value.is_some())
+            || Self::book_directories().iter().any(|root| {
+                if is_archived(root) {
+                    statistics::load(root)
+                        .values()
+                        .any(|change| change.value.is_some())
+                } else {
+                    library::load_metadata_at(root).is_some_and(|metadata| metadata.epub.is_some())
+                }
+            })
     }
 
     pub fn remove_deletion_records(&mut self) -> SyncResult<()> {
@@ -183,6 +186,12 @@ impl SyncStorage {
         shelves.retain(|_, shelf| shelf.value.is_some());
         if shelves.len() != count {
             library::save_shelf_list(app(), &shelves)?;
+        }
+        let mut orders = library::load_shelf_orders(app());
+        let count = orders.len();
+        orders.retain(|_, order| order.value.is_some());
+        if orders.len() != count {
+            library::save_shelf_orders(app(), &orders)?;
         }
         self.save()?;
         for root in cleared {
@@ -253,6 +262,7 @@ impl SyncStorage {
         );
         book.files = record.files.clone();
         book.sessions = statistics::load(&root);
+        book.completed = metadata.completed.clone();
 
         if !record.deleted {
             if let Some(bookmark) = library::load_bookmark_at(&root) {
@@ -317,13 +327,28 @@ impl SyncStorage {
         if let Some(old) = &old_metadata {
             metadata.id = old.id.clone();
             metadata.epub = old.epub.clone();
+            metadata.series = old.series.clone();
         }
         metadata.renamed_title = (metadata.title != book.metadata.value.title)
             .then(|| book.metadata.value.title.clone());
         metadata.modified = Some(book.metadata.modified);
         metadata.character_count = Some(book.character_count);
+        metadata.completed = book.completed.clone();
         if !book.deleted {
             metadata.shelves = Some(book.shelves.clone());
+            if let Some(published) = book.files.get(&SyncFileType::Epub)
+                && published.value.is_none()
+                && old_record
+                    .as_ref()
+                    .and_then(|record| record.sources.get(&SyncFileType::Epub))
+                    .copied()
+                    .unwrap_or(i64::MIN)
+                    < published.modified
+                && let Some(epub) = metadata.epub.take()
+            {
+                library::delete(&epub_url(&root, &epub))?;
+                library::delete(&root.join(SASAYAKI_TRANSCRIPT))?;
+            }
             if let Some(bookmark) = &book.bookmark {
                 metadata.last_access = metadata
                     .last_access
@@ -483,8 +508,38 @@ impl SyncStorage {
             }
         }
 
-        self.state.books.get_mut(&key).unwrap().pending = true;
+        let record = self.state.books.get_mut(&key).unwrap();
+        record.cleanup.insert(record.generation);
+        record.pending = true;
         self.save_changes(true)
+    }
+
+    pub fn handle_epub_removal(&mut self, folder: &str, cover_changed: bool) -> SyncResult<()> {
+        let key: String = folder.nfc().collect();
+        self.prepare_book(&Self::resolve_book_directory(folder));
+        self.mark_file_changed(&key, SyncFileType::Epub);
+        if cover_changed {
+            self.mark_file_changed(&key, SyncFileType::Cover);
+        }
+        let record = self.state.books.get_mut(&key).unwrap();
+        record.cleanup.insert(record.generation);
+        self.save_changes(true)
+    }
+
+    pub fn is_epub_removed(&self, folder: &str) -> bool {
+        let key: String = folder.nfc().collect();
+        let Some(record) = self.state.books.get(&key) else {
+            return false;
+        };
+        let published = record.files.get(&SyncFileType::Epub);
+        if record
+            .sources
+            .get(&SyncFileType::Epub)
+            .is_some_and(|&source| published.is_none_or(|file| source > file.modified))
+        {
+            return true;
+        }
+        published.is_some_and(|file| file.value.is_none())
     }
 
     pub fn delete_local_book(&mut self, key: &str) -> SyncResult<()> {
@@ -507,9 +562,13 @@ impl SyncStorage {
 
     pub fn delete_book(&mut self, key: &str) -> SyncResult<()> {
         let root = Self::book_directory(key, false);
-        statistics::archive(app(), &library::load_metadata_at(&root).unwrap())?;
+        if let Some(metadata) = library::load_metadata_at(&root) {
+            statistics::archive(app(), &metadata)?;
+        }
         let archive = Self::book_directory(key, true);
-        let stored = statistics::load(&archive).is_empty();
+        let stored = !statistics::load(&archive)
+            .values()
+            .any(|change| change.value.is_some());
 
         let record = self.state.books.get_mut(key).unwrap();
         if stored && !record.attached && !crate::sync::gdrive::manager::enabled() {
@@ -572,9 +631,10 @@ impl SyncStorage {
         self.save_changes(true)
     }
 
-    pub fn apply_shelves(&self, shelves: &ShelfList) -> SyncResult<()> {
-        if shelves != &library::load_shelf_list(app()) {
-            library::save_shelf_list(app(), shelves)?;
+    pub fn apply_shelves(&self, shelves: &SyncShelves) -> SyncResult<()> {
+        if shelves != &SyncShelves::local() {
+            library::save_shelf_list(app(), &shelves.shelves)?;
+            library::save_shelf_orders(app(), &shelves.orders)?;
             post_books_changed();
         }
         Ok(())

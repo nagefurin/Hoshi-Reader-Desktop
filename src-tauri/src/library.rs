@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use rbook::Epub;
+use rbook::epub::manifest::EpubManifestEntry;
+use rbook::epub::spine::EpubSpineEntry;
 use rbook::epub::toc::EpubTocEntry;
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -22,7 +24,10 @@ pub const BOOKINFO_FILE: &str = "bookinfo.json";
 pub const BOOKMARK_FILE: &str = "bookmark.json";
 pub const PAGES_FILE: &str = "pages.json";
 const METADATA_FILE: &str = "metadata.json";
+const ARCHIVED_COVER: &str = "cover_archived.jpg";
 const SHELVES_FILE: &str = "shelves.json";
+const SHELF_ORDERS_FILE: &str = "shelf_orders.json";
+const SERIES_FILE: &str = "series.json";
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +52,10 @@ pub struct BookMetadata {
     pub character_count: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shelves: Option<HashMap<String, Timestamped<bool>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed: Option<Timestamped<Option<i64>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
 }
 
 impl BookMetadata {
@@ -69,6 +78,8 @@ impl BookMetadata {
             modified: None,
             character_count: None,
             shelves: None,
+            completed: None,
+            series: None,
         }
     }
 }
@@ -88,6 +99,7 @@ pub struct BookListItem {
     pub characters_read: usize,
     pub characters_total: usize,
     pub has_book_info: bool,
+    pub epub_removed: bool,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -97,6 +109,16 @@ pub struct BookInfo {
     pub chapter_info: HashMap<String, ChapterInfo>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_pages: Option<HashMap<String, ImagePage>>,
+}
+
+/// A chapter with no text and a single image, keyed by spine index in `BookInfo::image_pages`.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ImagePage {
+    pub wide: bool,
+    pub blank: bool,
+    pub path: String,
 }
 
 impl BookInfo {
@@ -191,6 +213,9 @@ static RE_RP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<rp[^>]*>.*?</
 static RE_SCRIPT_STYLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<(?:script|style)[^>]*>.*?</(?:script|style)>").unwrap());
 static RE_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
+static RE_NAV_ANCHOR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?s)<a[^>]*?hrefs*=s*["']([^"']*)["'][^>]*>(.*?)</a>"#).unwrap()
+});
 static RE_NUMERIC_ENTITY: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"&#[xX]?[0-9A-Fa-f]+;").unwrap());
 pub const CHARACTER_CLASS: &str = r"0-9A-Za-z○◯々-〇〻ぁ-ゖゝ-ゞァ-ヺー０-９Ａ-Ｚａ-ｚｦ-ﾝ가-힣ㄱ-ㆎ\p{Radical}\p{Unified_Ideograph}";
@@ -245,29 +270,116 @@ pub fn save_pages(app: AppHandle, id: String, pages: serde_json::Value) {
 }
 
 #[tauri::command]
-pub fn mark_book_read(app: AppHandle, id: String) {
+pub fn mark_book_read(app: AppHandle, id: String, completed: i64) {
     let Some(dir) = book_dir(&app, &id) else {
         return;
     };
-    let Some(info) = read_json::<BookInfo>(&dir.join(BOOKINFO_FILE)) else {
+    let mut metadata = load_metadata_at(&dir).unwrap();
+    let info = read_json::<BookInfo>(&dir.join(BOOKINFO_FILE));
+    let Some(character_count) = info
+        .as_ref()
+        .map(|info| info.character_count)
+        .or(metadata.character_count.map(|count| count as usize))
+    else {
         return;
     };
     let bookmark = Bookmark {
         chapter_index: info
-            .chapter_info
-            .values()
+            .iter()
+            .flat_map(|info| info.chapter_info.values())
             .filter_map(|chapter| chapter.spine_index)
             .max()
             .unwrap_or(0),
         progress: 1.0,
-        character_count: info.character_count,
+        character_count,
         last_modified: Some(now_apple()),
     };
     write_json(&dir.join(BOOKMARK_FILE), &bookmark).ok();
-    let folder = load_metadata_at(&dir).unwrap().folder;
+    metadata.completed = Some(Timestamped {
+        modified: now_ms(),
+        value: Some(completed),
+    });
+    save_metadata(&metadata, &dir).ok();
     crate::sync::storage::shared()
-        .handle_book_change(&folder)
+        .handle_book_change(&metadata.folder)
         .ok();
+}
+
+#[tauri::command]
+pub fn set_book_completed(app: AppHandle, id: String, completed: Option<i64>) {
+    let Some(dir) = book_dir(&app, &id) else {
+        return;
+    };
+    let mut metadata = load_metadata_at(&dir).unwrap();
+    metadata.completed = Some(Timestamped {
+        modified: now_ms(),
+        value: completed,
+    });
+    save_metadata(&metadata, &dir).ok();
+    crate::sync::storage::shared()
+        .handle_book_change(&metadata.folder)
+        .ok();
+}
+
+#[tauri::command]
+pub fn book_epub_size(app: AppHandle, id: String) -> Option<u64> {
+    fs::metadata(book_epub_path(&app, &id)?)
+        .ok()
+        .map(|metadata| metadata.len())
+}
+
+#[tauri::command]
+pub fn remove_book_epub(app: AppHandle, id: String) -> Result<(), String> {
+    let Some(dir) = book_dir(&app, &id) else {
+        return Ok(());
+    };
+    let mut metadata = load_metadata_at(&dir).unwrap();
+    let Some(epub) = book_epub_path(&app, &id) else {
+        return Ok(());
+    };
+    delete(&epub)?;
+    delete(&dir.join(crate::sync::storage::SASAYAKI_TRANSCRIPT))?;
+    metadata.epub = None;
+
+    let archived_cover = dir.join(ARCHIVED_COVER);
+    let mut cover_changed = false;
+    if let Some(cover) = cover_url(&app, &metadata)
+        && write_thumbnail(&cover, &archived_cover, 720)
+    {
+        if cover.starts_with(&dir) {
+            delete(&cover)?;
+        }
+        metadata.cover = Some(format!("{BOOKS_DIR}/{}/{ARCHIVED_COVER}", metadata.folder));
+        cover_changed = true;
+    }
+
+    save_metadata(&metadata, &dir)?;
+    crate::sync::storage::shared()
+        .handle_epub_removal(&metadata.folder, cover_changed)
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn write_thumbnail(source: &Path, destination: &Path, max_pixel_size: u32) -> bool {
+    let Ok(bytes) = fs::read(source) else {
+        return false;
+    };
+    let Ok(image) = image::load_from_memory(&bytes) else {
+        return false;
+    };
+    let image = if image.width().max(image.height()) > max_pixel_size {
+        image.thumbnail(max_pixel_size, max_pixel_size)
+    } else {
+        image
+    }
+    .to_rgb8();
+    let mut encoded = Vec::new();
+    if image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 85)
+        .encode_image(&image)
+        .is_err()
+    {
+        return false;
+    }
+    fs::write(destination, encoded).is_ok()
 }
 
 #[tauri::command]
@@ -748,6 +860,23 @@ fn image_paths(content: &str, chapter_key: &str, manifest_keys: &HashSet<String>
         .collect()
 }
 
+pub(crate) fn process_book_info(epub: &Epub, root: &Path) -> Result<(), String> {
+    let info = process_book(epub);
+    write_json(&root.join(BOOKINFO_FILE), &info)?;
+
+    if let Some(bookmark) = load_bookmark_at(root) {
+        let position = info.resolve_character_position(bookmark.character_count);
+        let resolved = Bookmark {
+            chapter_index: position.map_or(0, |position| position.0),
+            progress: position.map_or(0.0, |position| position.1),
+            character_count: bookmark.character_count,
+            last_modified: bookmark.last_modified,
+        };
+        write_json(&root.join(BOOKMARK_FILE), &resolved)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn process_book(epub: &Epub) -> BookInfo {
     let mut info = BookInfo::default();
     let mut toc_fragments: HashMap<String, Vec<String>> = HashMap::new();
@@ -760,9 +889,10 @@ pub(crate) fn process_book(epub: &Epub) -> BookInfo {
         .filter_map(|entry| entry.resource().key().value().map(normalize_resource_key))
         .collect();
     let mut images = Vec::new();
+    let mut image_pages = HashMap::new();
     let mut seen_images: HashSet<String> = HashSet::new();
     for (index, entry) in epub.spine().iter().enumerate() {
-        let Some(item) = entry.manifest_entry() else {
+        let Some(item) = spine_item(&entry) else {
             continue;
         };
         let Some(href) = item.resource().key().value().map(normalize_resource_key) else {
@@ -775,7 +905,14 @@ pub(crate) fn process_book(epub: &Epub) -> BookInfo {
             continue;
         };
         let count = count_chars(&content);
-        for image in image_paths(&content, &href, &manifest_keys) {
+        let chapter_images = image_paths(&content, &href, &manifest_keys);
+        if count == 0
+            && let [image] = chapter_images.as_slice()
+            && let Some(page) = image_page(epub, image)
+        {
+            image_pages.insert(index.to_string(), page);
+        }
+        for image in chapter_images {
             if seen_images.insert(image.clone()) {
                 images.push(image);
             }
@@ -795,15 +932,110 @@ pub(crate) fn process_book(epub: &Epub) -> BookInfo {
         info.character_count += count;
     }
     info.images = Some(images);
+    info.image_pages = Some(image_pages);
     info
 }
 
-fn find_cover_in_manifest(epub: &Epub) -> Option<rbook::epub::manifest::EpubManifestEntry<'_>> {
+/// Images larger than 256 px. `blank` flags a near-uniform image (e.g. a blank page) from a 16×16
+/// grayscale thumbnail drawn over white.
+fn image_page(epub: &Epub, path: &str) -> Option<ImagePage> {
+    let entry = epub.manifest().iter().find(|entry| {
+        entry
+            .resource()
+            .key()
+            .value()
+            .map(normalize_resource_key)
+            .as_deref()
+            == Some(path)
+    })?;
+    let image = image::load_from_memory(&entry.read_bytes().ok()?).ok()?;
+    let (width, height) = (image.width(), image.height());
+    if width.max(height) <= 256 {
+        return None;
+    }
+    let thumbnail = image
+        .resize_exact(16, 16, image::imageops::FilterType::Triangle)
+        .to_luma_alpha8();
+    let pixels = thumbnail.pixels().map(|pixel| {
+        let [luma, alpha] = pixel.0.map(u32::from);
+        (luma * alpha + 255 * (255 - alpha)) / 255
+    });
+    let (min, max) = pixels.fold((255, 0), |(min, max), value| {
+        (min.min(value), max.max(value))
+    });
+    Some(ImagePage {
+        wide: width > height,
+        blank: max - min < 24,
+        path: path.to_string(),
+    })
+}
+
+const XHTML: &str = "application/xhtml+xml";
+const SVG: &str = "image/svg+xml";
+
+/// The manifest item a spine entry reads, switching a non-XHTML item (e.g. SVG) to its XHTML
+/// `fallback` when it has one.
+pub(crate) fn spine_item<'a>(entry: &EpubSpineEntry<'a>) -> Option<EpubManifestEntry<'a>> {
+    let item = entry.manifest_entry()?;
+    if item.media_type() != XHTML
+        && let Some(fallback) = item.fallback().filter(|f| f.media_type() == XHTML)
+    {
+        return Some(fallback);
+    }
+    Some(item)
+}
+
+/// Nav labels that contain ruby, rebuilt without their `<rt>`/`<rp>` text and keyed by raw href.
+/// rbook flattens every text node into the label, readings included.
+pub(crate) fn ruby_toc_labels(epub: &Epub) -> HashMap<String, String> {
+    let Some(html) = epub
+        .manifest()
+        .by_property("nav")
+        .next()
+        .and_then(|nav| nav.read_str().ok())
+    else {
+        return HashMap::new();
+    };
+    RE_NAV_ANCHOR
+        .captures_iter(&html)
+        .filter(|c| c[2].contains("<rt") || c[2].contains("<rp"))
+        .map(|c| {
+            let text = RE_RT.replace_all(&c[2], "");
+            let text = RE_RP.replace_all(&text, "");
+            let text = RE_TAG.replace_all(&text, "");
+            let text = text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .replace("&nbsp;", " ")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&amp;", "&");
+            (c[1].replace("&amp;", "&"), text)
+        })
+        .collect()
+}
+
+pub(crate) fn toc_label(entry: &EpubTocEntry, ruby_labels: &HashMap<String, String>) -> String {
+    entry
+        .href_raw()
+        .and_then(|href| ruby_labels.get(href.as_ref()))
+        .filter(|label| !label.is_empty())
+        .cloned()
+        .unwrap_or_else(|| entry.label().to_string())
+}
+
+fn find_cover_in_manifest(epub: &Epub) -> Option<EpubManifestEntry<'_>> {
     let manifest = epub.manifest();
     manifest
         .by_property("cover-image")
-        .next()
-        .or_else(|| manifest.cover_image())
+        .find(|entry| entry.media_type() != SVG)
+        .or_else(|| {
+            manifest
+                .cover_image()
+                .filter(|entry| entry.media_type() != SVG)
+        })
         .or_else(|| {
             manifest.iter().find(|entry| {
                 entry.id().to_ascii_lowercase().contains("cover")
@@ -844,6 +1076,7 @@ pub fn import_book(app: AppHandle, path: String) -> Result<BookMetadata, String>
         let resource = entry.resource();
         let name = Path::new(resource.key().value()?).file_name()?.to_str()?;
         let bytes = entry.read_bytes().ok()?;
+        fs::remove_file(dir.join(ARCHIVED_COVER)).ok();
         fs::write(dir.join(name), bytes).ok()?;
         Some(format!("{BOOKS_DIR}/{folder}/{name}"))
     });
@@ -857,26 +1090,12 @@ pub fn import_book(app: AppHandle, path: String) -> Result<BookMetadata, String>
     meta.renamed_title = existing
         .as_ref()
         .and_then(|existing| existing.renamed_title.clone());
-    meta.shelves = existing.and_then(|existing| existing.shelves);
+    meta.shelves = existing
+        .as_ref()
+        .and_then(|existing| existing.shelves.clone());
+    meta.completed = existing.and_then(|existing| existing.completed);
 
-    let info = process_book(&epub);
-    let saved = save_metadata(&meta, &dir)
-        .and_then(|_| write_json(&dir.join(BOOKINFO_FILE), &info))
-        .and_then(|_| match load_bookmark_at(&dir) {
-            Some(bookmark) => {
-                let position = info.resolve_character_position(bookmark.character_count);
-                write_json(
-                    &dir.join(BOOKMARK_FILE),
-                    &Bookmark {
-                        chapter_index: position.map_or(0, |position| position.0),
-                        progress: position.map_or(0.0, |position| position.1),
-                        character_count: bookmark.character_count,
-                        last_modified: bookmark.last_modified,
-                    },
-                )
-            }
-            None => Ok(()),
-        });
+    let saved = save_metadata(&meta, &dir).and_then(|_| process_book_info(&epub, &dir));
     if let Err(error) = saved {
         fs::remove_dir_all(&dir).ok();
         return Err(error);
@@ -939,6 +1158,8 @@ pub fn list_books(app: AppHandle) -> Vec<BookListItem> {
             let mut meta: BookMetadata = read_json(&dir.join(METADATA_FILE))?;
             repair_missing_cover(&dir, &mut meta);
             let (characters_read, characters_total) = book_characters(&dir, &meta);
+            let epub_removed =
+                meta.epub.is_none() && crate::sync::storage::shared().is_epub_removed(&meta.folder);
             Some(BookListItem {
                 progress: if characters_total > 0 {
                     characters_read as f64 / characters_total as f64
@@ -948,6 +1169,7 @@ pub fn list_books(app: AppHandle) -> Vec<BookListItem> {
                 characters_read,
                 characters_total,
                 has_book_info: dir.join(BOOKINFO_FILE).exists(),
+                epub_removed,
                 meta,
             })
         })
@@ -994,6 +1216,26 @@ pub fn rename_book(app: AppHandle, id: String, title: String) {
 #[tauri::command(async)]
 pub fn epub_author(app: AppHandle, id: String) -> Option<String> {
     author_from_epub(&Epub::open(book_epub_path(&app, &id)?).ok()?)
+}
+
+#[tauri::command]
+pub fn set_book_series(app: AppHandle, id: String, series: String) {
+    let Some(dir) = book_dir(&app, &id) else {
+        return;
+    };
+    let mut meta = load_metadata_at(&dir).unwrap();
+    meta.series = (!series.is_empty()).then_some(series);
+    save_metadata(&meta, &dir).ok();
+}
+
+#[tauri::command]
+pub fn load_series(app: AppHandle) -> serde_json::Value {
+    read_json(&books_dir(&app).join(SERIES_FILE)).unwrap_or_else(|| serde_json::json!({}))
+}
+
+#[tauri::command]
+pub fn save_series(app: AppHandle, store: serde_json::Value) -> Result<(), String> {
+    write_json(&books_dir(&app).join(SERIES_FILE), &store)
 }
 
 #[tauri::command]
@@ -1069,6 +1311,42 @@ pub(crate) fn load_shelf_list(app: &AppHandle) -> ShelfList {
 
 pub(crate) fn save_shelf_list(app: &AppHandle, shelves: &ShelfList) -> Result<(), String> {
     write_json(&shelves_path(app), shelves)
+}
+
+pub type ShelfOrders = HashMap<String, Timestamped<Option<Vec<String>>>>;
+
+pub(crate) fn load_shelf_orders(app: &AppHandle) -> ShelfOrders {
+    read_json(&books_dir(app).join(SHELF_ORDERS_FILE)).unwrap_or_default()
+}
+
+pub(crate) fn save_shelf_orders(app: &AppHandle, orders: &ShelfOrders) -> Result<(), String> {
+    write_json(&books_dir(app).join(SHELF_ORDERS_FILE), orders)
+}
+
+fn update_shelf_order(app: &AppHandle, name: String, order: Option<Vec<String>>) {
+    let mut orders = load_shelf_orders(app);
+    orders.insert(
+        name,
+        Timestamped {
+            modified: now_ms(),
+            value: order,
+        },
+    );
+    save_shelf_orders(app, &orders).ok();
+}
+
+#[tauri::command]
+pub fn shelf_orders(app: AppHandle) -> HashMap<String, Vec<String>> {
+    load_shelf_orders(&app)
+        .into_iter()
+        .filter_map(|(name, order)| order.value.map(|order| (name, order)))
+        .collect()
+}
+
+#[tauri::command]
+pub fn set_shelf_order(app: AppHandle, name: String, order: Option<Vec<String>>) {
+    update_shelf_order(&app, name, order);
+    crate::sync::storage::shared().handle_shelves_change().ok();
 }
 
 #[tauri::command(async)]
@@ -1176,6 +1454,12 @@ pub fn delete_shelf(app: AppHandle, name: String) {
     for id in &shelf.book_ids {
         update_memberships(&app, &[(name.clone(), false)], id);
     }
+    if load_shelf_orders(&app)
+        .get(&name)
+        .is_some_and(|order| order.value.is_some())
+    {
+        update_shelf_order(&app, name.clone(), None);
+    }
     update_shelf_list(&app, |list| {
         list.insert(
             name,
@@ -1206,6 +1490,13 @@ pub fn rename_shelf(app: AppHandle, name: String, new_name: String) {
                 &book.id,
             );
         }
+    }
+    if let Some(order) = load_shelf_orders(&app)
+        .get(&name)
+        .and_then(|order| order.value.clone())
+    {
+        update_shelf_order(&app, name.clone(), None);
+        update_shelf_order(&app, new_name.clone(), Some(order));
     }
     update_shelf_list(&app, |list| {
         let position = list.get(&name).and_then(|shelf| shelf.value);

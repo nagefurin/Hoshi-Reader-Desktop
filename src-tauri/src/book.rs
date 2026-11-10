@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use rbook::Epub;
@@ -27,7 +28,13 @@ pub struct TocItem {
     pub indent_level: usize,
 }
 
-fn collect_toc(entry: &EpubTocEntry, spine: &[String], level: usize, out: &mut Vec<TocItem>) {
+fn collect_toc(
+    entry: &EpubTocEntry,
+    spine: &[String],
+    ruby_labels: &HashMap<String, String>,
+    level: usize,
+    out: &mut Vec<TocItem>,
+) {
     for child in entry.iter() {
         let spine_index = child
             .manifest_entry()
@@ -39,13 +46,13 @@ fn collect_toc(entry: &EpubTocEntry, spine: &[String], level: usize, out: &mut V
                 .and_then(|href| href.fragment())
                 .map(|f| urlencoding::decode(f).map_or_else(|_| f.to_string(), |d| d.into_owned()));
             out.push(TocItem {
-                label: child.label().to_string(),
+                label: library::toc_label(&child, ruby_labels),
                 spine_index,
                 fragment,
                 indent_level: level,
             });
         }
-        collect_toc(&child, spine, level + 1, out);
+        collect_toc(&child, spine, ruby_labels, level + 1, out);
     }
 }
 
@@ -62,20 +69,10 @@ pub fn open_book(
     let document = book_document(&epub);
     let info = library::load_book_info_at(&root);
     if info.is_none() {
-        let processed = library::process_book(&epub);
-        library::write_json(&root.join(library::BOOKINFO_FILE), &processed).ok();
-        if let Some(bookmark) = library::load_bookmark_at(&root) {
-            let position = processed.resolve_character_position(bookmark.character_count);
-            let resolved = library::Bookmark {
-                chapter_index: position.map_or(0, |position| position.0),
-                progress: position.map_or(0.0, |position| position.1),
-                character_count: bookmark.character_count,
-                last_modified: bookmark.last_modified,
-            };
-            library::write_json(&root.join(library::BOOKMARK_FILE), &resolved).ok();
-        }
+        library::process_book_info(&epub, &root).ok();
     } else if info.is_some_and(|info| {
         info.images.is_none()
+            || info.image_pages.is_none()
             || !document
                 .spine
                 .iter()
@@ -102,13 +99,13 @@ pub(crate) fn book_document(epub: &Epub) -> BookDocument {
     let spine: Vec<String> = epub
         .spine()
         .iter()
-        .filter_map(|entry| entry.manifest_entry())
+        .filter_map(|entry| library::spine_item(&entry))
         .filter_map(|entry| entry.resource().key().value().map(normalize_resource_key))
         .collect();
 
     let mut toc = Vec::new();
     if let Some(root) = epub.toc().contents() {
-        collect_toc(&root, &spine, 0, &mut toc);
+        collect_toc(&root, &spine, &library::ruby_toc_labels(epub), 0, &mut toc);
     }
 
     BookDocument { title, spine, toc }

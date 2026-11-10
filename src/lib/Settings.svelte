@@ -104,6 +104,7 @@
     missingBooks: 0,
   });
   const failedBooks = $derived(driveStatus.queue.filter((item) => item.error).length);
+  const isChecking = $derived(driveStatus.isSyncing && driveStatus.progress === null);
   const flows = $derived.by(() => {
     const result: { label: string; flow: SyncFlow }[] = [];
     if (driveStatus.progress?.upload) result.push({ label: "Uploading", flow: driveStatus.progress.upload });
@@ -395,6 +396,7 @@
   const handlebars: { name: string; advanced?: boolean }[] = [
     { name: "{expression}" },
     { name: "{reading}" },
+    { name: "{furigana}", advanced: true },
     { name: "{furigana-plain}" },
     { name: "{audio}" },
     { name: "{glossary}" },
@@ -688,9 +690,11 @@
     (document.activeElement as HTMLElement | null)?.blur();
   }
 
-  function pickFallback(value: string, e: MouseEvent & { currentTarget: HTMLElement }) {
+  type FallbackKey = "selectedGlossaryFallback" | "popupSelectionTextFallback";
+
+  function pickFallback(key: FallbackKey, value: string) {
     if (!anki) return;
-    anki.selectedGlossaryFallback = value;
+    anki[key] = value;
     saveAnki();
     (document.activeElement as HTMLElement | null)?.blur();
   }
@@ -848,6 +852,50 @@
       {/each}
     </ul>
   </div>
+{/snippet}
+
+{#snippet fallbackField(label: string, key: FallbackKey)}
+  {#if anki}
+    <div class="grid gap-1.5">
+      <span class="text-sm font-medium">{label} Fallback</span>
+      <div class="join w-full">
+        <input
+          class="input join-item w-full"
+          bind:value={anki[key]}
+          onchange={saveAnki}
+          placeholder="None"
+        />
+        <div class="dropdown dropdown-end" use:dropdownFlip>
+          <div
+            tabindex="0"
+            role="button"
+            class="btn join-item btn-square"
+          >
+            <ChevronDown class="size-4" />
+          </div>
+          <ul
+            tabindex="-1"
+            class="dropdown-content menu z-30 my-1 w-72 rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
+          >
+            <li>
+              <button onclick={() => pickFallback(key, "")}>None</button>
+            </li>
+            <div class="divider my-0"></div>
+            {#each fallbackOptions as option (option)}
+              <li>
+                <button
+                  class="font-mono text-xs"
+                  onclick={() => pickFallback(key, option)}
+                >
+                  {option}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        </div>
+      </div>
+    </div>
+  {/if}
 {/snippet}
 
 <svelte:window
@@ -1314,6 +1362,8 @@
                         <span class="text-error">{failedBooks} failed</span>
                       {:else if driveStatus.queue.length > 0}
                         <span class="tabular-nums text-base-content/60">{driveStatus.queue.length}</span>
+                      {:else if isChecking}
+                        <span class="text-base-content/60">Checking</span>
                       {:else}
                         <span class="text-base-content/60">Empty</span>
                       {/if}
@@ -1353,6 +1403,9 @@
                     onclick={syncNow}
                   >
                     Sync Now
+                    {#if isChecking}
+                      <span class="loading loading-spinner loading-xs"></span>
+                    {/if}
                   </button>
                   <button
                     class="btn btn-outline btn-sm"
@@ -1537,7 +1590,7 @@
                 </span>
               </div>
               <div class="grid gap-1.5">
-                <label class="text-sm font-medium" for="anki-address">Address</label>
+                <label class="text-sm font-medium" for="anki-address">Server URL</label>
                 <div class="join w-full">
                   <input
                     id="anki-address"
@@ -1562,6 +1615,14 @@
                   onchange={saveAnki}
                 />
               </div>
+
+              {#if ankiReachable}
+                <SettingToggle
+                  label="Force Sync on Adding Card"
+                  bind:checked={anki.forceSync}
+                  onchange={saveAnki}
+                />
+              {/if}
 
               {#if ankiError}
                 <p class="select-text text-sm text-error">{ankiError}</p>
@@ -1732,99 +1793,55 @@
               </div>
             </div>
 
-            <div class="card border border-base-300 bg-base-100">
-              <div class="card-body gap-4">
-                <SettingRow label="Duplicate Behavior">
-                  <select
-                    class="select select-sm w-36"
-                    bind:value={anki.duplicateBehavior}
-                    onchange={saveAnki}
-                  >
-                    {#each Object.entries(duplicateBehaviorLabels) as [value, label] (value)}
-                      <option {value}>{label}</option>
-                    {/each}
-                  </select>
-                </SettingRow>
-                <SettingToggle
-                  label="Disable Show Notes Button"
-                  bind:checked={anki.disableShowNotes}
+            <SettingsSection title="Duplicates">
+              <SettingRow label="Duplicate Scope">
+                <select
+                  class="select select-sm w-36"
+                  bind:value={anki.duplicateScope}
                   onchange={saveAnki}
-                />
-                <SettingRow label="Duplicate Scope">
-                  <select
-                    class="select select-sm w-36"
-                    bind:value={anki.duplicateScope}
-                    onchange={saveAnki}
-                  >
-                    {#each Object.entries(duplicateScopeLabels) as [value, label] (value)}
-                      <option {value}>{label}</option>
-                    {/each}
-                  </select>
-                </SettingRow>
-                <SettingToggle
-                  label="Compact Glossaries"
-                  bind:checked={anki.compactGlossaries}
+                >
+                  {#each Object.entries(duplicateScopeLabels) as [value, label] (value)}
+                    <option {value}>{label}</option>
+                  {/each}
+                </select>
+              </SettingRow>
+              <SettingToggle
+                label="Check All Models"
+                bind:checked={anki.checkAllModels}
+                onchange={saveAnki}
+              />
+              <SettingRow label="Duplicate Behavior">
+                <select
+                  class="select select-sm w-36"
+                  bind:value={anki.duplicateBehavior}
                   onchange={saveAnki}
-                />
-                <SettingToggle
-                  label="Check All Models"
-                  bind:checked={anki.checkAllModels}
-                  onchange={saveAnki}
-                />
-                <SettingToggle
-                  label="Force Sync on adding card"
-                  bind:checked={anki.forceSync}
-                  onchange={saveAnki}
-                />
-              </div>
-            </div>
+                >
+                  {#each Object.entries(duplicateBehaviorLabels) as [value, label] (value)}
+                    <option {value}>{label}</option>
+                  {/each}
+                </select>
+              </SettingRow>
+              <SettingToggle
+                label="Disable Show Notes Button"
+                bind:checked={anki.disableShowNotes}
+                onchange={saveAnki}
+              />
+            </SettingsSection>
 
             <SettingsSection title="Advanced">
+              <SettingToggle
+                label="Compact Glossaries"
+                bind:checked={anki.compactGlossaries}
+                onchange={saveAnki}
+              />
               <SettingToggle
                 label="Show All Handlebars"
                 bind:checked={anki.showAllHandlebars}
                 onchange={saveAnki}
               />
 
-              <div class="grid gap-1.5">
-                <span class="text-sm font-medium">{"{selected-glossary}"} Fallback</span>
-                <div class="join w-full">
-                  <input
-                    class="input join-item w-full"
-                    bind:value={anki.selectedGlossaryFallback}
-                    onchange={saveAnki}
-                    placeholder="None"
-                  />
-                  <div class="dropdown dropdown-end" use:dropdownFlip>
-                    <div
-                      tabindex="0"
-                      role="button"
-                      class="btn join-item btn-square"
-                    >
-                      <ChevronDown class="size-4" />
-                    </div>
-                    <ul
-                      tabindex="-1"
-                      class="dropdown-content menu z-30 my-1 w-72 rounded-box border border-base-300 bg-base-100 p-1 shadow-lg"
-                    >
-                      <li>
-                        <button onclick={(e) => pickFallback("", e)}>None</button>
-                      </li>
-                      <div class="divider my-0"></div>
-                      {#each fallbackOptions as option (option)}
-                        <li>
-                          <button
-                            class="font-mono text-xs"
-                            onclick={(e) => pickFallback(option, e)}
-                          >
-                            {option}
-                          </button>
-                        </li>
-                      {/each}
-                    </ul>
-                  </div>
-                </div>
-              </div>
+              {@render fallbackField("{selected-glossary}", "selectedGlossaryFallback")}
+              {@render fallbackField("{popup-selection-text}", "popupSelectionTextFallback")}
 
               <button
                 class="btn btn-ghost btn-sm -mx-2 justify-between px-2 text-sm font-normal"
@@ -1849,7 +1866,12 @@
           <div
             class="flex h-12 items-center justify-center rounded-box border border-base-300 text-sm text-base-content/60"
           >
-            All Books Synced
+            {#if isChecking}
+              <span class="loading loading-spinner loading-xs"></span>
+              Checking for Changes
+            {:else}
+              All Books Synced
+            {/if}
           </div>
         {:else}
           <div class="flex min-h-0 flex-col gap-3 overflow-y-auto">

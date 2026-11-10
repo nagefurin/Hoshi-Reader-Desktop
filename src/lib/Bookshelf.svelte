@@ -10,6 +10,7 @@
   import { Menu, Submenu, type MenuOptions } from "@tauri-apps/api/menu";
   import { ask, message } from "@tauri-apps/plugin-dialog";
   import {
+    Archive,
     ArrowDown,
     ArrowUp,
     CircleArrowDown,
@@ -18,6 +19,7 @@
     Folder,
     ListChecks,
     Plus,
+    RotateCcw,
     Search,
     Trash2,
   } from "@lucide/svelte";
@@ -26,12 +28,26 @@
   import ReadingOverview from "./ReadingOverview.svelte";
   import Titlebar from "./Titlebar.svelte";
   import ViewMenu from "./ViewMenu.svelte";
+  import { series } from "./series";
+  import { resetSeriesOrder, saveSeries, seriesSort, seriesStore, setSeriesOrder, setSeriesSort } from "./seriesStore.svelte";
   import { isMac } from "./platform";
   import { relativeDate } from "./relativeDate";
   import { schemeUrl } from "./scheme";
   import { Sortable } from "./sortable.svelte";
   import { bookSort, reverseBookSort, setBookSort, sortBooks, sortOption } from "./bookSort.svelte";
-  import { createShelf, moveBook, saveShelfOrders, setShelfOrder, shelves, sourceTitle } from "./shelves.svelte";
+  import {
+    completionDate,
+    createShelf,
+    isCompleted,
+    isFinished,
+    moveBook,
+    resetShelfOrder,
+    saveShelfOrder,
+    setShelfOrder,
+    shelves,
+    sourceTitle,
+  } from "./shelves.svelte";
+  import SettingToggle from "./SettingToggle.svelte";
   import { shellConfig } from "./shellConfig.svelte";
   import { formatNumber, formatUnits } from "./statsModel.svelte";
   import { syncConfig } from "./syncConfig.svelte";
@@ -48,6 +64,7 @@
     onDeleteLocal,
     onRename,
     onEditAuthor,
+    onEditSeries,
     onReload,
     onStatistics,
   }: {
@@ -60,6 +77,7 @@
     onDeleteLocal: (id: string) => Promise<void>;
     onRename: (id: string, title: string) => void;
     onEditAuthor: (id: string, author: string) => void;
+    onEditSeries: (id: string, series: string) => void;
     onReload: () => Promise<void>;
     onStatistics: () => void;
   } = $props();
@@ -70,7 +88,13 @@
 
   const shelfName = $derived(source.kind === "shelf" ? source.name : null);
 
-  const option = $derived(sortOption(shelfName));
+  const seriesKey = $derived(source.kind === "series" ? source.key : null);
+  const canCustom = $derived(shelfName !== null || seriesKey !== null);
+  const option = $derived(seriesKey !== null ? seriesSort(seriesKey).option : sortOption(shelfName));
+  const reversed = $derived(seriesKey !== null ? seriesSort(seriesKey).reversed : bookSort.reversed);
+  const order = $derived(
+    seriesKey !== null ? (seriesStore.orders[seriesKey] ?? []) : shelfName ? (shelves.orders[shelfName] ?? []) : [],
+  );
 
   let readingTimes = $state<Record<string, number>>({});
 
@@ -86,12 +110,23 @@
     });
   });
 
+  function sortCompleted(books: BookMetadata[]) {
+    const dated = books
+      .filter((book) => completionDate(book) !== null)
+      .toSorted((a, b) => completionDate(b)!.getTime() - completionDate(a)!.getTime());
+    const unknown = sortBooks(books.filter((book) => completionDate(book) === null), "Recent", []);
+    return [...(bookSort.reversed ? dated.reverse() : dated), ...unknown];
+  }
+
   const sortedBooks = $derived(
-    sortBooks(books, option, shelfName ? (shelves.orders[shelfName] ?? []) : [], bookSort.reversed, readingTimes),
+    source.kind === "completed" && option === "Recent"
+      ? sortCompleted(books)
+      : sortBooks(books, option, order, reversed, readingTimes),
   );
 
   function sortBy(next: SortOption) {
-    if (option === next) reverseBookSort();
+    if (seriesKey !== null) setSeriesSort(seriesKey, next);
+    else if (option === next && next !== "Custom") reverseBookSort();
     else setBookSort(next, shelfName);
   }
 
@@ -110,18 +145,32 @@
   let anchor = $state<number | null>(null);
 
   const selectedBooks = $derived(library.filter((book) => selectedIds.includes(book.id)));
-  const canReorder = $derived(shelfName !== null && option === "Custom" && isSelecting && !query.trim());
+  const canReorder = $derived(canCustom && option === "Custom" && isSelecting && !query.trim());
 
   const sort = new Sortable({
-    commit: saveShelfOrders,
+    commit: () => {
+      if (seriesKey !== null) saveSeries();
+      else if (shelfName) saveShelfOrder(shelfName);
+    },
     threshold: 5,
     move: (from, to) => {
-      if (!shelfName) return;
-      const ids = sortedBooks.map((book) => book.id);
-      ids.splice(to, 0, ids.splice(from, 1)[0]);
-      setShelfOrder(shelfName, ids);
+      const folders = sortedBooks.map((book) => book.folder);
+      folders.splice(to, 0, folders.splice(from, 1)[0]);
+      if (seriesKey !== null) setSeriesOrder(seriesKey, folders);
+      else if (shelfName) setShelfOrder(shelfName, folders);
     },
   });
+
+  async function resetOrder() {
+    if (!(await ask(seriesKey !== null ? "This restores the default order." : "This restores the default order on all devices.", {
+      title: "Reset Order?",
+      kind: "warning",
+      okLabel: "Reset",
+      cancelLabel: "Cancel",
+    }))) return;
+    if (seriesKey !== null) resetSeriesOrder(seriesKey);
+    else if (shelfName) await resetShelfOrder(shelfName);
+  }
 
   function startDrag(e: PointerEvent, index: number) {
     sort.dragged = false;
@@ -154,6 +203,8 @@
       isSelecting = true;
       selectedIds = selectedIds.includes(book.id) ? selectedIds.filter((selected) => selected !== book.id) : [...selectedIds, book.id];
       anchor = index;
+    } else if (book.epubRemoved) {
+      toast?.show("The EPUB of this book was removed.", "error");
     } else if (!book.epub) {
       openTarget = book.id;
       downloadBook(book, true);
@@ -255,10 +306,50 @@
     await onDelete(book.id);
   }
 
-  async function markRead(books: BookMetadata[]) {
-    const target = books.length === 1 ? `"${displayTitle(books[0])}"` : `${books.length} books`;
-    if (!(await ask(`Mark ${target} as read?`, { okLabel: "Confirm", cancelLabel: "Cancel" }))) return;
-    for (const book of books) await invoke("mark_book_read", { id: book.id });
+  let completionDialog = $state<HTMLDialogElement>();
+  let completionBooks = $state<BookMetadata[]>([]);
+  let completionEditing = $state(false);
+  let completionDay = $state("");
+  let completionUnknown = $state(false);
+  let completionRemove = $state(false);
+  let completionSize = $state<number | null>(null);
+
+  function dayKey(date: Date) {
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  const today = $derived(dayKey(new Date()));
+
+  function formatSize(bytes: number) {
+    return bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+  }
+
+  async function openCompletion(books: BookMetadata[]) {
+    const book = books.length === 1 ? books[0] : null;
+    const date = book ? completionDate(book) : null;
+    completionBooks = books;
+    completionEditing = book !== null && isCompleted(book);
+    completionDay = dayKey(date ?? new Date());
+    completionUnknown = completionEditing && date === null;
+    completionRemove = false;
+    completionSize = book?.epub ? await invoke<number | null>("book_epub_size", { id: book.id }) : null;
+    completionDialog?.showModal();
+  }
+
+  async function saveCompletion() {
+    const [year, month, day] = completionDay.split("-").map(Number);
+    const completed = completionUnknown || !year ? 0 : new Date(year, month - 1, day).getTime();
+    completionDialog?.close();
+    try {
+      for (const book of completionBooks) {
+        if (completionEditing) await invoke("set_book_completed", { id: book.id, completed });
+        else await invoke("mark_book_read", { id: book.id, completed });
+        if (completionRemove) await invoke("remove_book_epub", { id: book.id });
+      }
+    } catch (e) {
+      toast?.show(String(e), "error");
+    }
     await onReload();
     clearSelection();
   }
@@ -275,6 +366,7 @@
       const sessions = await invoke<Sessions>("load_statistics", { folder: book.folder });
       await invoke("delete_reading_sessions", { folder: book.folder, ids: Object.keys(sessions) });
       await invoke("save_bookmark", { id: book.id, chapterIndex: 0, progress: 0, characterCount: 0 });
+      await invoke("set_book_completed", { id: book.id, completed: null });
     }
     await onReload();
     clearSelection();
@@ -286,15 +378,17 @@
         invoke<Bookmark | null>("load_bookmark", { id: book.id }),
         invoke<Sessions>("load_statistics", { folder: book.folder }),
       ]);
-      return (bookmark !== null && (bookmark.chapterIndex > 0 || bookmark.progress > 0 || bookmark.characterCount > 0)) ||
+      return isCompleted(book) ||
+        (bookmark !== null && (bookmark.chapterIndex > 0 || bookmark.progress > 0 || bookmark.characterCount > 0)) ||
         Object.values(sessions).some((session) => session.value !== null);
     }));
-    const read = books.filter((book) => book.hasBookInfo && book.progress < 1);
     const unread = books.filter((_, index) => canMarkUnread[index]);
-    return [
-      { id: "mark-read", text: "Read", enabled: read.length > 0, action: () => markRead(read) },
-      { id: "mark-unread", text: "Unread", enabled: unread.length > 0, action: () => markUnread(unread) },
-    ];
+    const unreadItem = { id: "mark-unread", text: "Unread", enabled: unread.length > 0, action: () => markUnread(unread) };
+    if (books.length === 1 && isCompleted(books[0])) {
+      return [{ id: "completion-date", text: "Completion Date…", action: () => openCompletion(books) }, unreadItem];
+    }
+    const read = books.filter((book) => !isCompleted(book) && (book.hasBookInfo || (book.characterCount ?? 0) > 0));
+    return [{ id: "mark-read", text: "Read…", enabled: read.length > 0, action: () => openCompletion(read) }, unreadItem];
   }
 
   let renameDialog = $state<HTMLDialogElement>();
@@ -327,6 +421,24 @@
     authorDialog?.close();
   }
 
+  let seriesDialog = $state<HTMLDialogElement>();
+  let seriesBook = $state<BookMetadata | null>(null);
+  let seriesName = $state("");
+  let seriesText = $state("");
+
+  function openEditSeries(book: BookMetadata) {
+    seriesBook = book;
+    seriesName = series(library, seriesStore.names).find((group) => group.books.some((entry) => entry.id === book.id))?.name ?? "";
+    seriesText = seriesName;
+    seriesDialog?.showModal();
+  }
+
+  function saveEditSeries() {
+    const text = seriesText.trim();
+    if (seriesBook && (seriesBook.series || text !== seriesName)) onEditSeries(seriesBook.id, text);
+    seriesDialog?.close();
+  }
+
   let toast = $state<ReturnType<typeof Toast>>();
 
   async function showMenu(book: BookMetadata, e: MouseEvent) {
@@ -341,13 +453,16 @@
       return;
     }
     await popupMenu([
-      ...(syncConfig.enableSync && !book.epub
+      ...(syncConfig.enableSync && !book.epub && !book.epubRemoved
         ? [{ id: `download-${book.id}`, text: "Download", action: () => queueDownloads([book]) }]
         : []),
       await Submenu.new({ text: "Move to", items: moveItems([book.id]) }),
       await Submenu.new({ text: "Mark", items: await markItems([book]) }),
       { id: `rename-${book.id}`, text: "Rename", action: () => openRename(book) },
       { id: `author-${book.id}`, text: "Edit Author", action: () => openEditAuthor(book) },
+      ...(shellConfig.showSeries
+        ? [{ id: `series-${book.id}`, text: "Edit Series", action: () => openEditSeries(book) }]
+        : []),
       { id: `delete-${book.id}`, text: "Delete", action: () => deleteBook(book) },
     ]);
   }
@@ -386,21 +501,28 @@
       ? 'cursor-grab'
       : ''} {sort.index === index ? 'opacity-40' : ''}"
   >
-    <div
-      class="relative aspect-[0.709] w-full overflow-hidden rounded-sm border border-base-300 bg-base-200 {isSelecting && selectedIds.includes(book.id) ? 'outline-2 outline-offset-2 outline-primary' : ''}"
+    <BookCover
+      bunko
+      title={displayTitle(book)}
+      author={book.author}
+      src={book.cover ? schemeUrl("cover", book.id) + "?w=512" : null}
+      frontClass="bg-base-200 {isSelecting && selectedIds.includes(book.id) ? 'outline-2 outline-offset-2 outline-primary' : ''}"
     >
-      <BookCover title={displayTitle(book)} author={book.author} src={book.cover ? schemeUrl("cover", book.id) + "?w=512" : null} />
       {#if isSelecting && selectedIds.includes(book.id)}
         <CircleCheck class="absolute right-1.5 top-1.5 size-[22px] rounded-full bg-blue-500 text-white" />
       {:else if isSelecting}
         <span class="absolute right-1.5 top-1.5 size-[22px] rounded-full border-2 border-white/85 bg-black/25"></span>
+      {:else if isFinished(book)}
+        <CircleCheck class="absolute bottom-1.5 right-1.5 size-[22px] rounded-full bg-[#999] text-white" />
       {/if}
-    </div>
+    </BookCover>
     {#if source.kind !== "home"}
       {@render status(book)}
     {/if}
     <span class="{downloadingBooks[book.id] === undefined ? 'line-clamp-2' : 'line-clamp-1'} text-sm leading-snug transition-colors group-hover:text-secondary group-focus-visible:text-secondary">
-      {#if !book.epub}
+      {#if book.epubRemoved}
+        <Archive class="mb-0.5 inline size-3.5" />
+      {:else if !book.epub}
         <Cloud class="mb-0.5 inline size-3.5" />
       {/if}
       {displayTitle(book)}
@@ -423,7 +545,7 @@
     <button class="inline-flex items-center gap-1 hover:text-base-content {option === value ? 'text-base-content' : ''}" onclick={() => sortBy(value)}>
       {label}
       {#if option === value}
-        {#if (value === "Title") !== bookSort.reversed}
+        {#if (value === "Title") !== reversed}
           <ArrowUp class="size-3" />
         {:else}
           <ArrowDown class="size-3" />
@@ -446,12 +568,14 @@
   >
     <td>
       <div class="flex min-w-0 items-center gap-3">
-        <span class="relative block h-[45px] w-8 shrink-0 overflow-hidden rounded-sm bg-base-200 ring-1 ring-black/5">
-          <BookCover title={displayTitle(book)} author={book.author} src={book.cover ? schemeUrl("cover", book.id) + "?w=128" : null} />
+        <span class="block w-8 shrink-0">
+          <BookCover bunko title={displayTitle(book)} author={book.author} src={book.cover ? schemeUrl("cover", book.id) + "?w=128" : null} frontClass="bg-base-200" />
         </span>
         <div class="flex min-w-0 flex-col">
           <span class="truncate">
-            {#if !book.epub}
+            {#if book.epubRemoved}
+              <Archive class="mb-0.5 inline size-3.5" />
+            {:else if !book.epub}
               <Cloud class="mb-0.5 inline size-3.5" />
             {/if}
             {displayTitle(book)}
@@ -503,13 +627,19 @@
             <Trash2 class="size-4" />
             Delete
           </button>
+          {#if canCustom && option === "Custom"}
+            <button class="btn btn-ghost btn-sm" disabled={order.length === 0} onclick={resetOrder}>
+              <RotateCcw class="size-4" />
+              Reset Order
+            </button>
+          {/if}
           <button class="btn btn-neutral btn-sm" onclick={clearSelection}>Done</button>
         {:else}
           <label class="input input-sm w-52">
             <Search class="size-4 text-base-content/50" />
             <input type="search" placeholder="Search" autocomplete="off" spellcheck="false" bind:value={query} />
           </label>
-          <ViewMenu shelf={shelfName} />
+          <ViewMenu {option} {reversed} custom={canCustom} onpick={sortBy} />
           <button class="btn btn-ghost btn-sm btn-square" title="Select" onclick={() => (isSelecting = true)}><ListChecks class="size-4" /></button>
           <button class="btn btn-neutral btn-sm btn-square" onclick={onImport}>
             <Plus class="size-4" />
@@ -633,6 +763,78 @@
           <button class="btn btn-sm">Cancel</button>
         </form>
         <button class="btn btn-neutral btn-sm" onclick={saveAuthor}>Save</button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>close</button>
+    </form>
+  </dialog>
+
+  <dialog class="modal" bind:this={seriesDialog}>
+    <div class="modal-box">
+      <h3 class="mb-4 text-base font-semibold">Edit Series</h3>
+      <input
+        class="input w-full"
+        placeholder="Series"
+        bind:value={seriesText}
+        onkeydown={(e) => {
+          if (e.key === "Enter") saveEditSeries();
+        }}
+      />
+      <div class="modal-action">
+        <form method="dialog">
+          <button class="btn btn-sm">Cancel</button>
+        </form>
+        <button class="btn btn-neutral btn-sm" onclick={saveEditSeries}>Save</button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>close</button>
+    </form>
+  </dialog>
+
+  <dialog class="modal" bind:this={completionDialog}>
+    <div class="modal-box flex flex-col gap-4">
+      <h3 class="text-base font-semibold">Mark as Read</h3>
+      {#if completionBooks.length === 1}
+        {@const book = completionBooks[0]}
+        <div class="flex min-w-0 items-center gap-3">
+          <span class="block w-12 shrink-0">
+            <BookCover bunko title={displayTitle(book)} author={book.author} src={book.cover ? schemeUrl("cover", book.id) + "?w=128" : null} frontClass="bg-base-200" />
+          </span>
+          <div class="flex min-w-0 flex-col">
+            <span class="line-clamp-2 text-sm">{displayTitle(book)}</span>
+            {#if book.author}
+              <span class="truncate text-xs text-base-content/60">{book.author}</span>
+            {/if}
+          </div>
+        </div>
+      {:else}
+        <p class="text-sm text-base-content/60">{completionBooks.length} books</p>
+      {/if}
+
+      {#if completionSize !== null}
+        <div class="flex flex-col gap-1">
+          <SettingToggle label="Delete EPUB" bind:checked={completionRemove} onchange={() => {}} />
+          <span class="text-xs text-base-content/60">
+            Frees {formatSize(completionSize)} on this device{syncConfig.enableSync ? " and on Google Drive" : ""}.
+          </span>
+        </div>
+      {/if}
+
+      <SettingToggle label="Unknown Date" bind:checked={completionUnknown} onchange={() => {}} />
+      {#if !completionUnknown}
+        <label class="flex items-center justify-between gap-3 text-sm">
+          Completion Date
+          <input type="date" class="input input-sm w-44" max={today} bind:value={completionDay} />
+        </label>
+      {/if}
+
+      <div class="modal-action mt-0">
+        <form method="dialog">
+          <button class="btn btn-sm">Cancel</button>
+        </form>
+        <button class="btn btn-neutral btn-sm" disabled={!completionUnknown && !completionDay} onclick={saveCompletion}>Done</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">

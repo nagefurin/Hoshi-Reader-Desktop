@@ -684,6 +684,16 @@ async fn download_file(
     };
     let destination = root.join(&file_name);
     storage::write_atomic(&destination, &data)?;
+    if file_type == SyncFileType::Epub {
+        let root = root.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(epub) = rbook::Epub::open(&destination) {
+                library::process_book_info(&epub, &root).ok();
+            }
+        })
+        .await
+        .ok();
+    }
     let relative = format!(
         "Books/{}{}/{}",
         if record.deleted {
@@ -802,13 +812,11 @@ async fn cleanup_files(key: &str, listing: &Listing) -> SyncResult<()> {
                     .filter(|file| !file.is_folder() && Some(&file.name) != cover.as_ref())
                 {
                     let current = store().state.books[key].clone();
-                    let stale = file.name.ends_with(SASAYAKI_MATCH)
-                        && Some(&file.name)
-                            != current
-                                .files
-                                .get(&SyncFileType::Sasayaki)
-                                .and_then(|file| file.value.as_ref());
-                    if !current.deleted && !stale {
+                    let referenced = [SyncFileType::Epub, SyncFileType::Sasayaki]
+                        .iter()
+                        .filter_map(|file_type| current.files.get(file_type))
+                        .any(|published| published.value.as_ref() == Some(&file.name));
+                    if !current.deleted && referenced {
                         continue;
                     }
                     if file.is_recent() {

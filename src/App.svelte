@@ -34,11 +34,16 @@
   } from "./lib/dictConfig.svelte";
   import {
     authors,
+    isCompleted,
     loadShelves,
+    migrateShelfOrders,
     sameSource,
     shelfBooks,
     shelves,
   } from "./lib/shelves.svelte";
+  import { series } from "./lib/series";
+  import { loadSeries, renameSeries, seriesStore } from "./lib/seriesStore.svelte";
+  import { Menu } from "@tauri-apps/api/menu";
   import { shellConfig } from "./lib/shellConfig.svelte";
   import { configureSync, network, syncConfig, syncNow } from "./lib/syncConfig.svelte";
 
@@ -52,6 +57,7 @@
     savedHighlights: BookHighlight[];
     bookInfo: BookInfo;
     bookmark: Bookmark | null;
+    completed: boolean;
     skipSyncOnOpen: boolean;
   };
 
@@ -84,6 +90,7 @@
   });
 
   const hasSource = $derived(view === "books" || view === "settings");
+  const bookSeries = $derived(shellConfig.showSeries ? series(books, seriesStore.names) : []);
   const bookAuthors = $derived(shellConfig.showAuthors ? authors(books) : []);
   const bookShelves = $derived(
     shelves.list
@@ -91,6 +98,16 @@
       .filter((shelf) => shelf.count > 0),
   );
   const unshelvedCount = $derived(shelfBooks(books, { kind: "unshelved" }).length);
+  const completedCount = $derived(shellConfig.showCompleted ? shelfBooks(books, { kind: "completed" }).length : 0);
+
+  $effect(() => {
+    if (source.kind === "completed" && !shellConfig.showCompleted) source = { kind: "home" };
+    const key = source.kind === "series" ? source.key : null;
+    if (key === null) return;
+    const group = bookSeries.find((entry) => entry.key === key);
+    if (!group) source = { kind: "home" };
+    else if (source.kind === "series" && source.name !== group.name) source = { ...source, name: group.name };
+  });
 
   async function refresh() {
     books = await invoke<BookMetadata[]>("list_books");
@@ -182,6 +199,7 @@
       savedHighlights,
       bookInfo,
       bookmark,
+      completed: isCompleted(book),
       skipSyncOnOpen,
     };
   }
@@ -205,6 +223,38 @@
   async function editBookAuthor(id: string, author: string) {
     await invoke("set_book_author", { id, author });
     await refresh();
+  }
+
+  async function editBookSeries(id: string, series: string) {
+    await invoke("set_book_series", { id, series });
+    await refresh();
+  }
+
+  let renameSeriesDialog = $state<HTMLDialogElement>();
+  let renameSeriesKey = $state<string | null>(null);
+  let renameSeriesText = $state("");
+
+  async function showSeriesMenu(key: string, name: string, e: MouseEvent) {
+    e.preventDefault();
+    const menu = await Menu.new({
+      items: [
+        {
+          id: `rename-series-${key}`,
+          text: "Rename Series",
+          action: () => {
+            renameSeriesKey = key;
+            renameSeriesText = name;
+            renameSeriesDialog?.showModal();
+          },
+        },
+      ],
+    });
+    await menu.popup();
+  }
+
+  function saveSeriesName() {
+    if (renameSeriesKey !== null) renameSeries(renameSeriesKey, renameSeriesText.trim());
+    renameSeriesDialog?.close();
   }
 
   $effect(() => {
@@ -244,18 +294,19 @@
     return () => clearInterval(timer);
   });
 
-  refresh();
-  loadShelves();
+  loadSeries();
+  Promise.all([refresh(), loadShelves()]).then(() => migrateShelfOrders(books));
   configureSync().then(() => invoke("gdrive_sync_start"));
   loadCollapsedDictionaries();
   autoUpdateDictionaries();
 </script>
 
-{#snippet sourceRow(target: ShelfSource, label: string, count: number | null)}
+{#snippet sourceRow(target: ShelfSource, label: string, count: number | null, onmenu?: (e: MouseEvent) => void)}
   <li>
     <button
       class={sameSource(source, target) ? "menu-active" : ""}
       onclick={() => (source = target)}
+      oncontextmenu={onmenu}
     >
       <span class="truncate">{label}</span>
       {#if count !== null}
@@ -291,6 +342,9 @@
           <ul class="menu w-full gap-0.5 p-2">
             {@render sourceRow({ kind: "home" }, "Home", null)}
             {@render sourceRow({ kind: "all" }, "All Books", books.length)}
+            {#if completedCount > 0}
+              {@render sourceRow({ kind: "completed" }, "Completed", completedCount)}
+            {/if}
             {#if bookShelves.length > 0}
               {@render sourceRow({ kind: "unshelved" }, "Unshelved", unshelvedCount)}
             {/if}
@@ -298,6 +352,17 @@
               <li class="menu-title text-[11px] font-medium uppercase tracking-wider">Shelves</li>
               {#each bookShelves as shelf (shelf.name)}
                 {@render sourceRow({ kind: "shelf", name: shelf.name }, shelf.name, shelf.count)}
+              {/each}
+            {/if}
+            {#if bookSeries.length > 0}
+              <li class="menu-title text-[11px] font-medium uppercase tracking-wider">Series</li>
+              {#each bookSeries as group (group.key)}
+                {@render sourceRow(
+                  { kind: "series", name: group.name, key: group.key },
+                  group.name,
+                  group.books.length,
+                  (e) => showSeriesMenu(group.key, group.name, e),
+                )}
               {/each}
             {/if}
             {#if bookAuthors.length > 0}
@@ -352,6 +417,7 @@
           onDeleteLocal={deleteLocalBook}
           onRename={renameBook}
           onEditAuthor={editBookAuthor}
+          onEditSeries={editBookSeries}
           onReload={refresh}
           onStatistics={() => (view = "statistics")}
         />
@@ -380,6 +446,29 @@
       if (sameSource(source, { kind: "shelf", name })) source = { kind: "shelf", name: newName };
     }}
   />
+
+  <dialog class="modal" bind:this={renameSeriesDialog}>
+    <div class="modal-box">
+      <h3 class="mb-4 text-base font-semibold">Rename Series</h3>
+      <input
+        class="input w-full"
+        placeholder="Series"
+        bind:value={renameSeriesText}
+        onkeydown={(e) => {
+          if (e.key === "Enter") saveSeriesName();
+        }}
+      />
+      <div class="modal-action">
+        <form method="dialog">
+          <button class="btn btn-sm">Cancel</button>
+        </form>
+        <button class="btn btn-neutral btn-sm" onclick={saveSeriesName}>Save</button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>close</button>
+    </form>
+  </dialog>
 {/if}
 
 <ChangelogDialog />

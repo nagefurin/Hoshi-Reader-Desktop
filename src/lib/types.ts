@@ -12,6 +12,9 @@ export type BookMetadata = {
   charactersRead: number;
   charactersTotal: number;
   hasBookInfo: boolean;
+  completed?: Timestamped<number | null> | null;
+  series?: string | null;
+  epubRemoved: boolean;
 };
 
 export type Timestamped<T> = {
@@ -31,8 +34,9 @@ export type BookShelf = {
 };
 
 export type ShelfSource =
-  | { kind: "all" | "home" | "unshelved" }
-  | { kind: "shelf" | "author"; name: string };
+  | { kind: "all" | "home" | "unshelved" | "completed" }
+  | { kind: "shelf" | "author"; name: string }
+  | { kind: "series"; name: string; key: string };
 
 export type ChapterInfo = {
   spineIndex: number | null;
@@ -45,6 +49,13 @@ export type BookInfo = {
   characterCount: number;
   chapterInfo: Record<string, ChapterInfo>;
   images?: string[] | null;
+  imagePages?: Record<string, ImagePage> | null;
+};
+
+export type ImagePage = {
+  wide: boolean;
+  blank: boolean;
+  path: string;
 };
 
 export type Bookmark = {
@@ -243,6 +254,7 @@ export type AnkiSettings = {
   availableDecks: string[];
   availableNoteTypes: AnkiNoteType[];
   selectedGlossaryFallback: string;
+  popupSelectionTextFallback: string;
   showAllHandlebars: boolean;
   audioSources: AudioSource[];
   audioEnableAutoplay: boolean;

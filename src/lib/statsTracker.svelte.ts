@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
+import { statsConfig } from "./statsConfig.svelte";
 import { dayKey } from "./statsModel.svelte";
 import type { ReadingDay, ReadingSession, Sessions } from "./types";
 
-function startingSession(): ReadingSession {
-  const timestamp = Date.now();
+function startingSession(timestamp = Date.now()): ReadingSession {
   return { startedAt: timestamp, endedAt: timestamp, charactersRead: 0, readingTime: 0 };
 }
 
@@ -93,6 +93,12 @@ export class StatsTracker {
     const charDiff = Math.max(this.currentCharacter() - this.lastCount, -this.currentSession.charactersRead);
     if (timeDiff === 0) return;
 
+    if (statisticsDay(now, this.resetTime()) > statisticsDay(this.currentSession.startedAt, this.resetTime())) {
+      void this.saveStats();
+      this.sessionId = crypto.randomUUID().toUpperCase();
+      this.currentSession = startingSession(now);
+    }
+
     this.currentSession = {
       ...this.currentSession,
       charactersRead: Math.max(this.currentSession.charactersRead + charDiff, 0),
@@ -136,6 +142,7 @@ export class StatsTracker {
   }
 
   private async saveStats() {
+    if (statsConfig.statisticsSkipEmptySessions && this.currentSession.charactersRead === 0) return;
     this.applySessions(
       await invoke<Sessions>("save_reading_session", {
         folder: this.folder,

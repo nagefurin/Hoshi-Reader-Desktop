@@ -334,7 +334,13 @@ export class SasayakiPlayer {
 
   handleRestoreCompleted(currentIndex: number) {
     if (!this.hasAudio) this.restoreAudio();
-    if (!this.hasMatch || !this.chapterTransition) return;
+    if (!this.hasMatch) return;
+    if (!this.chapterTransition) {
+      if (this.currentCue && this.currentCue.chapterIndex === currentIndex) {
+        this.bridge.highlightCue(this.currentCue.id, false);
+      }
+      return;
+    }
 
     if (this.pendingImage && this.pendingImage.chapterIndex === currentIndex) {
       const image = this.pendingImage;
@@ -609,31 +615,22 @@ export class SasayakiPlayer {
   private updateCue(time: number) {
     if (!this.hasAudio || !this.hasMatch || this.chapterTransition || this.pausedOnImage) return;
 
-    const cue = this.timeline.cue(time - this.delay);
+    const lookupTime = time - this.delay;
+    const cue = this.timeline.cue(lookupTime);
     if (!cue) {
+      const next = this.timeline.cue(lookupTime + 0.15);
+      if (next && next.id === this.currentCue?.id) return;
       this.clearDisplayedCue();
+      const image = next && this.pauseImage(next);
+      if (image) this.beginImagePause(image, next);
       return;
     }
     if (cue.id === this.currentCue?.id) return;
 
-    if (
-      this.isPlaying &&
-      this.autoScroll &&
-      this.hasPlayedOnce &&
-      sasayakiConfig.sasayakiImagePause &&
-      this.lastCue
-    ) {
-      const prev = this.lastCue;
-      if (
-        cue.chapterIndex > prev.chapterIndex ||
-        (cue.chapterIndex === prev.chapterIndex && cue.start > prev.start)
-      ) {
-        const image = this.imageBetween(prev, cue);
-        if (image) {
-          this.beginImagePause(image, cue);
-          return;
-        }
-      }
+    const image = this.pauseImage(cue);
+    if (image) {
+      this.beginImagePause(image, cue);
+      return;
     }
 
     if (this.isLoaded(cue.chapterIndex)) {
@@ -659,13 +656,25 @@ export class SasayakiPlayer {
     this.bridge.clearCue();
   }
 
-  private imageBetween(prev: SasayakiMatch, next: SasayakiMatch): SasayakiImage | null {
+  private pauseImage(cue: SasayakiMatch): SasayakiImage | null {
+    const prev = this.lastCue;
+    if (
+      !this.isPlaying ||
+      !this.autoScroll ||
+      !this.hasPlayedOnce ||
+      !sasayakiConfig.sasayakiImagePause ||
+      !prev ||
+      cue.chapterIndex < prev.chapterIndex ||
+      (cue.chapterIndex === prev.chapterIndex && cue.start <= prev.start)
+    ) {
+      return null;
+    }
     const after = (image: SasayakiImage) =>
       image.chapterIndex > prev.chapterIndex ||
       (image.chapterIndex === prev.chapterIndex && image.offset >= prev.start + prev.length);
     const before = (image: SasayakiImage) =>
-      image.chapterIndex < next.chapterIndex ||
-      (image.chapterIndex === next.chapterIndex && image.offset <= next.start);
+      image.chapterIndex < cue.chapterIndex ||
+      (image.chapterIndex === cue.chapterIndex && image.offset <= cue.start);
     return (this.matchData?.images ?? []).find((image) => after(image) && before(image)) ?? null;
   }
 
@@ -696,6 +705,9 @@ export class SasayakiPlayer {
       return;
     }
     this.imageResumeCue = null;
+    if (this.currentTime > resume.startTime + this.delay) {
+      this.audio!.currentTime = resume.startTime + this.delay;
+    }
     if (this.isLoaded(resume.chapterIndex)) {
       this.displayCue(resume, this.autoScroll && this.hasPlayedOnce);
       this.startPlayback();
