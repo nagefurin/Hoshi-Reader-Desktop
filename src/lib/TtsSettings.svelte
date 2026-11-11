@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { onDestroy } from "svelte";
+  import { splitTtsSynthesisText } from "./ttsSegmentation";
   import { ttsConfig, ttsRuntime, saveTtsConfig, type TtsEngine, type TtsSynthesisOptions } from "./ttsConfig.svelte";
   import TtsCustomSources from "./TtsCustomSources.svelte";
   import SettingsSection from "./SettingsSection.svelte";
@@ -293,6 +295,200 @@
     ttsConfig.replacements = ttsConfig.replacements.filter((rule) => rule.id !== id);
     save();
   }
+
+  let previewText = $state("今日はいい天気ですね。");
+  let previewResult = $state("");
+  let previewError = $state("");
+  let previewing = $state(false);
+  let previewAudio: HTMLAudioElement | null = null;
+  let previewToken = 0;
+  let resolvePreviewAudio: (() => void) | null = null;
+
+  function stopPreview() {
+    previewToken++;
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (previewAudio) {
+      previewAudio.pause();
+      previewAudio.onended = null;
+      previewAudio.onerror = null;
+      previewAudio.removeAttribute("src");
+      previewAudio.load();
+      previewAudio = null;
+    }
+    resolvePreviewAudio?.();
+    resolvePreviewAudio = null;
+    previewing = false;
+  }
+
+  function applyPreviewDictionary(source: string): string {
+    const scopedRules = ttsConfig.replacements.filter(
+      (rule) => rule.pattern && (!rule.bookId || rule.bookId === bookId),
+    );
+    const literalRules = scopedRules
+      .filter((rule) => !(rule.regex ?? true))
+      .map((rule) => ({
+        pattern: Array.from(rule.pattern),
+        replacement: rule.replacement,
+        scoped: Boolean(rule.bookId),
+      }))
+      .sort((a, b) => b.pattern.length - a.pattern.length || Number(b.scoped) - Number(a.scoped));
+
+    const characters = Array.from(source);
+    let result = "";
+    let cursor = 0;
+    while (cursor < characters.length) {
+      const literal = literalRules.find(({ pattern }) =>
+        pattern.length > 0 &&
+        cursor + pattern.length <= characters.length &&
+        characters.slice(cursor, cursor + pattern.length).every((character, index) => character === pattern[index]),
+      );
+      if (literal) {
+        result += literal.replacement;
+        cursor += literal.pattern.length;
+      } else {
+        result += characters[cursor];
+        cursor++;
+      }
+    }
+
+    for (const rule of scopedRules) {
+      if (!(rule.regex ?? true)) continue;
+      try {
+        result = result.replace(new RegExp(rule.pattern, "gu"), rule.replacement);
+      } catch {
+        // Match TTS playback: invalid regex rules are ignored.
+      }
+    }
+    return result;
+  }
+
+  function previewVoiceForCurrentEngine(): string {
+    const engine = ttsConfig.engine;
+    if (engine.startsWith("custom:")) {
+      return ttsConfig.customSources.find((source) => source.id === engine)?.narrationVoice ?? "";
+    }
+    if (engine === "device") return ttsConfig.voice;
+    if (engine === "edge") return ttsConfig.edgeVoice;
+    if (engine === "azure") return ttsConfig.azureVoice;
+    if (engine === "microsoftTranslator") return ttsConfig.microsoftTranslatorVoice;
+    if (engine === "googleCloud") return ttsConfig.googleCloudVoice;
+    return "ja";
+  }
+
+  async function playPreviewAudio(parts: string[], format: "mp3" | "wav", token: number) {
+    const mimeType = format === "wav" ? "audio/wav" : "audio/mpeg";
+    for (const part of parts) {
+      if (token !== previewToken) return;
+      const audio = new Audio("data:" + mimeType + ";base64," + part);
+      audio.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
+      audio.playbackRate = Math.min(3, Math.max(0.5, Number(ttsConfig.playbackRate) || 1));
+      previewAudio = audio;
+      await new Promise<void>((resolve, reject) => {
+        resolvePreviewAudio = resolve;
+        audio.onended = () => {
+          if (resolvePreviewAudio === resolve) resolvePreviewAudio = null;
+          resolve();
+        };
+        audio.onerror = () => {
+          if (resolvePreviewAudio === resolve) resolvePreviewAudio = null;
+          reject(new Error("The preview audio could not be played."));
+        };
+        void audio.play().catch(reject);
+      });
+      if (token !== previewToken) return;
+      previewAudio = null;
+    }
+  }
+
+  async function runPreview(testDictionary: boolean) {
+    const source = previewText.trim();
+    if (!source) return;
+    stopPreview();
+    const token = previewToken;
+    previewError = "";
+    previewResult = testDictionary ? applyPreviewDictionary(source) : "";
+    const spokenText = testDictionary ? previewResult : source;
+    if (!spokenText.trim()) {
+      previewError = "The pronunciation rules produced empty speech.";
+      return;
+    }
+    previewing = true;
+
+    try {
+      const engine = ttsConfig.engine;
+      if (engine === "device" && !usesNativeWindowsSpeech) {
+        if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+          throw new Error("System speech synthesis is not available in this WebView.");
+        }
+        const japaneseVoices = window.speechSynthesis.getVoices()
+          .filter((voice) => voice.lang.trim().toLowerCase().startsWith("ja"));
+        if (!japaneseVoices.length) {
+          throw new Error("No Japanese system voice is available. Install a Japanese Windows Speech voice or choose an online provider.");
+        }
+        const selected = japaneseVoices.find((voice) => voice.voiceURI === ttsConfig.voice)
+          ?? japaneseVoices.find((voice) => voice.default)
+          ?? japaneseVoices[0];
+        await new Promise<void>((resolve, reject) => {
+          const utterance = new SpeechSynthesisUtterance(spokenText);
+          utterance.lang = "ja-JP";
+          utterance.voice = selected;
+          utterance.rate = Math.min(3, Math.max(0.5, (Number(ttsConfig.rate) || 1) * (Number(ttsConfig.playbackRate) || 1)));
+          utterance.pitch = Math.min(2, Math.max(0.5, Number(ttsConfig.pitch) || 1));
+          utterance.volume = Math.min(1, Math.max(0, Number(ttsConfig.volume) || 0));
+          utterance.onend = () => resolve();
+          utterance.onerror = (event) => reject(new Error("System TTS error: " + event.error));
+          window.speechSynthesis.speak(utterance);
+        });
+        return;
+      }
+
+      const customSource = ttsConfig.customSources.find((source) => source.id === engine) ?? null;
+      const customKey = ttsRuntime.customKeys[engine] ?? "";
+      const apiKey = engine === "azure"
+        ? ttsRuntime.azureKey
+        : engine === "googleCloud"
+          ? ttsRuntime.googleCloudKey
+          : "";
+      const baseUrl = engine === "azure" ? ttsConfig.azureRegion : "";
+      const rate = Number(customSource?.rate ?? ttsConfig.rate) || 1;
+      const pitch = Number(ttsConfig.pitch) || 0;
+      const voice = previewVoiceForCurrentEngine();
+      const options = ttsConfig.providerOptions[engine] ?? providerDefaults;
+      const encodedParts: string[] = [];
+      for (const part of splitTtsSynthesisText(spokenText, engine)) {
+        if (token !== previewToken) return;
+        encodedParts.push(await invoke<string>("tts_synthesize", {
+          engine: engine === "device" && usesNativeWindowsSpeech ? "system" : engine,
+          text: part,
+          baseUrl,
+          apiKey,
+          voice,
+          rate,
+          pitch,
+          options,
+          customSource,
+          customKey,
+        }));
+      }
+
+      const format = engine === "device" && usesNativeWindowsSpeech
+        ? "wav"
+        : engine.startsWith("custom:")
+          ? (customSource?.format ?? "mp3")
+          : ["azure", "microsoftTranslator", "googleCloud"].includes(engine)
+            ? (ttsConfig.providerOptions[engine]?.format ?? "mp3")
+            : "mp3";
+      await playPreviewAudio(encodedParts, format, token);
+    } catch (error) {
+      if (token === previewToken) previewError = String(error);
+    } finally {
+      if (token === previewToken) previewing = false;
+    }
+  }
+
+  onDestroy(stopPreview);
 </script>
 
 {#if showEnableToggle}
@@ -481,25 +677,8 @@
 
 <TtsCustomSources compact={compact} />
 
-{#if !["device", "googleTranslate"].includes(ttsConfig.engine) && !ttsConfig.engine.startsWith("custom:")}
+{#if ["azure", "microsoftTranslator", "googleCloud"].includes(ttsConfig.engine)}
   <SettingsSection compact={compact} title="Synthesis">
-    <SettingRow compact={compact} label="Synthesis Volume">
-      <div class="flex w-56 items-center gap-3">
-        <input
-          class="range range-xs flex-1"
-          type="range"
-          min={ttsConfig.engine === "googleCloud" ? -96 : -100}
-          max={ttsConfig.engine === "googleCloud" ? 16 : 100}
-          step="1"
-          value={currentOptions().volume}
-          oninput={(event) => updateOptions({ volume: Number(event.currentTarget.value) })}
-        />
-        <span class="w-14 text-right text-xs tabular-nums">
-          {ttsConfig.engine === "googleCloud" ? Math.round(currentOptions().volume) + " dB" : Math.round(currentOptions().volume) + "%"}
-        </span>
-      </div>
-    </SettingRow>
-
     {#if ["azure", "microsoftTranslator"].includes(ttsConfig.engine) && (currentVoice?.styles.length ?? 0) > 0}
       <SettingRow compact={compact} label="Speaking Style">
         <select
@@ -595,6 +774,24 @@
 {/if}
 
 <SettingsSection compact={compact} title="Playback">
+{#if !["device", "googleTranslate"].includes(ttsConfig.engine) && !ttsConfig.engine.startsWith("custom:")}
+  <SettingRow compact={compact} label="Synthesis Volume">
+    <div class="flex w-56 items-center gap-3">
+      <input
+        class="range range-xs flex-1"
+        type="range"
+        min={ttsConfig.engine === "googleCloud" ? -96 : -100}
+        max={ttsConfig.engine === "googleCloud" ? 16 : 100}
+        step="1"
+        value={currentOptions().volume}
+        oninput={(event) => updateOptions({ volume: Number(event.currentTarget.value) })}
+      />
+      <span class="w-14 text-right text-xs tabular-nums">
+        {ttsConfig.engine === "googleCloud" ? Math.round(currentOptions().volume) + " dB" : Math.round(currentOptions().volume) + "%"}
+      </span>
+    </div>
+  </SettingRow>
+{/if}
 {#if ttsConfig.engine.startsWith("custom:")}
   <SettingRow compact={compact} label="Speech Rate">
     <p class="text-xs text-base-content/60">Configured per source in Custom online TTS sources below.</p>
@@ -711,6 +908,35 @@
     </div>
   </SettingRow>
   <p class="text-xs text-base-content/60">Auto-scroll follows the sentence being read. Image hold pauses speech on illustrated pages; auto-scroll must be enabled for image holds to run.</p>
+</SettingsSection>
+
+<SettingsSection compact={compact} title="Voice Preview & Pronunciation Test">
+  <SettingRow compact={compact} label="Test Text">
+    <textarea
+      class="textarea textarea-sm min-h-20 w-full max-w-lg"
+      rows="2"
+      bind:value={previewText}
+      placeholder="Enter Japanese text to preview or test dictionary rules"
+    ></textarea>
+  </SettingRow>
+  <div class="flex flex-wrap items-center gap-2">
+    <button class="btn btn-outline btn-sm" onclick={() => runPreview(false)} disabled={previewing || !previewText.trim()}>
+      Preview Voice
+    </button>
+    <button class="btn btn-primary btn-sm" onclick={() => runPreview(true)} disabled={previewing || !previewText.trim()}>
+      Test Pronunciation Dictionary
+    </button>
+    {#if previewing}
+      <button class="btn btn-ghost btn-sm" onclick={stopPreview}>Stop</button>
+    {/if}
+  </div>
+  {#if previewResult}
+    <p class="text-xs text-base-content/60" aria-live="polite">Dictionary output: {previewResult}</p>
+  {/if}
+  {#if previewError}
+    <p class="text-xs text-error" role="alert">{previewError}</p>
+  {/if}
+  <p class="text-xs text-base-content/60">Preview Voice speaks the text as entered. Test Pronunciation Dictionary applies the active global and current-book rules before speaking it with the selected voice and playback settings.</p>
 </SettingsSection>
 
 <SettingsSection compact={compact} title="Pronunciation Dictionary">

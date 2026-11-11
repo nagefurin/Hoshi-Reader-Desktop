@@ -67,6 +67,7 @@
     onReadSegment,
     onHoldImages,
     onControlApi,
+    onRefreshReaderPosition,
     onClearHighlight,
   }: {
     id: string;
@@ -81,6 +82,7 @@
     onReadSegment: (spineIndex: number, sourceText: string, imagesBefore: number[]) => Promise<void>;
     onHoldImages: (spineIndex: number, sourceText: string, images: number[]) => Promise<void>;
     onControlApi?: (api: TtsControlApi | null) => void;
+    onRefreshReaderPosition?: () => Promise<{ chapterIndex: number; characterOffset: number }>;
     onClearHighlight: () => void;
   } = $props();
 
@@ -842,6 +844,19 @@
     else await resumePlayback();
   }
 
+  async function startAtReaderPosition() {
+    errorMessage = "";
+    try {
+      const refreshed = await onRefreshReaderPosition?.();
+      await playFrom(
+        refreshed?.chapterIndex ?? currentChapterIndex,
+        refreshed?.characterOffset ?? readerCharacterOffset(),
+      );
+    } catch (error) {
+      errorMessage = String(error);
+    }
+  }
+
   function stop() {
     cancelCurrent();
     active = false;
@@ -903,7 +918,7 @@
     </button>
   </div>
 
-  <button class="btn btn-outline btn-sm" onclick={() => playFrom(currentChapterIndex, readerCharacterOffset())} disabled={loading}>
+  <button class="btn btn-outline btn-sm" onclick={startAtReaderPosition} disabled={loading}>
     Start at reader position
   </button>
   <button class="btn btn-ghost btn-sm" onclick={() => playFrom(0)} disabled={loading}>

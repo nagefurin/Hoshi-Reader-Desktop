@@ -1149,6 +1149,15 @@
       if (focused) markActivity();
       await tick();
       if (focused) {
+        // The official app and this fork share bookmark/statistics files on Windows.
+        // Refresh them after returning so this process does not count another app's reading again.
+        if (!ttsSessionActive && !sasayaki?.isPlaying) {
+          try {
+            await refreshSharedReaderPosition();
+          } catch (error) {
+            console.warn("Could not refresh the shared reader position:", error);
+          }
+        }
         invoke("gdrive_sync_book", { id });
       } else {
         await stats.flushStats();
@@ -1239,6 +1248,52 @@
       progress,
       characterCount: calculateCharacterProgress(index, progress),
     });
+  }
+
+  let sharedPositionRefresh: Promise<{ chapterIndex: number; characterOffset: number }> | null = null;
+
+  function refreshSharedReaderPosition(): Promise<{ chapterIndex: number; characterOffset: number }> {
+    if (sharedPositionRefresh) return sharedPositionRefresh;
+    sharedPositionRefresh = (async () => {
+      // Save this process's own session before importing the changes made by the other app.
+      await stats.flushStats();
+      await stats.loadSessions();
+
+      const bookmark = await invoke<Bookmark | null>("load_bookmark", { id });
+      if (
+        bookmark &&
+        Number.isInteger(bookmark.chapterIndex) &&
+        bookmark.chapterIndex >= 0 &&
+        bookmark.chapterIndex < spine.length
+      ) {
+        const localCharacter = calculateCharacterProgress(index, progress);
+        const movedExternally =
+          bookmark.characterCount !== localCharacter ||
+          bookmark.chapterIndex !== index ||
+          Math.abs(bookmark.progress - progress) > 0.000001;
+
+        if (movedExternally && !bookDeleted) {
+          applyingBookmark = true;
+          clearForwardHistory();
+          closePopups();
+          index = bookmark.chapterIndex;
+          progress = bookmark.progress;
+          pushFrame();
+          // Do not count the externally-read range as activity in this app.
+          stats.resetTrackingBaseline();
+        }
+      }
+
+      const chapterStart = bookInfo.chapterInfo[spine[index]]?.currentTotal ?? 0;
+      const character = calculateCharacterProgress(index, progress);
+      return {
+        chapterIndex: index,
+        characterOffset: Math.max(0, Math.round(character - chapterStart)),
+      };
+    })().finally(() => {
+      sharedPositionRefresh = null;
+    });
+    return sharedPositionRefresh;
   }
 
   $effect(() => {
@@ -2616,6 +2671,7 @@
               bind:sessionActive={ttsSessionActive}
               bind:playing={ttsPlaying}
               onControlApi={registerTtsControls}
+              onRefreshReaderPosition={refreshSharedReaderPosition}
               onReadSegment={onTtsReadSegment}
               onHoldImages={holdTtsImages}
               onClearHighlight={clearTtsHighlight}
