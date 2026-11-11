@@ -844,8 +844,8 @@
   {/if}
   <SettingRow compact={compact} label="Playback Speed">
     <div class="flex w-56 items-center gap-3">
-      <input class="range range-xs flex-1" type="range" min="0.5" max="3" step="0.1" bind:value={ttsConfig.playbackRate} oninput={save} />
-      <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.playbackRate).toFixed(1)}x</span>
+      <input class="range range-xs flex-1" type="range" min="0.5" max="3" step="0.05" bind:value={ttsConfig.playbackRate} oninput={save} />
+      <span class="w-10 text-right text-xs tabular-nums">{Number(ttsConfig.playbackRate).toFixed(2)}x</span>
     </div>
   </SettingRow>
   <SettingRow compact={compact} label="Preload Sentences">
