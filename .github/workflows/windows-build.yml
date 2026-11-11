@@ -3,9 +3,6 @@ run-name: Portable fork build (${{ github.ref_name }})
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - Text-to-speech
 
 env:
   HOSHI_GOOGLE_CLIENT_ID: ${{ secrets.HOSHI_GOOGLE_CLIENT_ID }}
