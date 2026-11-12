@@ -980,10 +980,9 @@
               </button>
             {/if}
 
-            <div role="tablist" class="tabs tabs-border">
+            <div class="tabs tabs-border">
               {#each Object.keys(labels) as key (key)}
                 <button
-                  role="tab"
                   class="tab {selected === key ? 'tab-active text-primary' : ''}"
                   onclick={() => (selected = key as DictionaryType)}
                 >
@@ -1032,7 +1031,7 @@
             {/if}
 
             {#if error}
-              <div role="alert" class="alert alert-error">
+              <div class="alert alert-error">
                 <CircleAlert class="size-4" />
                 <pre class="select-text whitespace-pre-wrap font-sans text-sm">{error}</pre>
               </div>
@@ -1465,7 +1464,7 @@
         {/each}
 
         {#if backupError}
-          <div role="alert" class="alert alert-error">
+          <div class="alert alert-error">
             <CircleAlert class="size-4" />
             <pre class="select-text whitespace-pre-wrap font-sans text-sm">{backupError}</pre>
           </div>
@@ -1645,10 +1644,9 @@
                   </button>
                 </div>
 
-                <div role="tablist" class="tabs tabs-border">
+                <div class="tabs tabs-border">
                   {#each anki.cardFormats as format (format.id)}
                     <button
-                      role="tab"
                       class="tab {activeFormat?.id === format.id ? 'tab-active text-primary' : ''}"
                       onclick={() => (selectedFormatId = format.id)}
                     >

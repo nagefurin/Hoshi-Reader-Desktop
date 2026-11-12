@@ -5,8 +5,14 @@ export type ShellConfig = {
   showSeries: boolean;
   showAuthors: boolean;
   showCompleted: boolean;
+  hiddenShelves: string[];
   bookshelfCoverMode: "Show" | "Blur" | "Hide";
   bookshelfLayout: "Grid" | "List";
+  bookshelfShowProgressBar: boolean;
+  bookshelfShowPercentage: boolean;
+  bookshelfShowCharacters: boolean;
+  bookshelfShowTitle: boolean;
+  bookshelfShowAuthor: boolean;
 };
 
 const defaults: ShellConfig = {
@@ -14,8 +20,14 @@ const defaults: ShellConfig = {
   showSeries: false,
   showAuthors: true,
   showCompleted: true,
+  hiddenShelves: [],
   bookshelfCoverMode: "Show",
   bookshelfLayout: "Grid",
+  bookshelfShowProgressBar: true,
+  bookshelfShowPercentage: true,
+  bookshelfShowCharacters: false,
+  bookshelfShowTitle: true,
+  bookshelfShowAuthor: false,
 };
 
 const store = persisted<ShellConfig>("shell.config", defaults);

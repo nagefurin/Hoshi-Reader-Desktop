@@ -13,7 +13,8 @@ function storedCustomShelves() {
   }
 }
 
-const storedOption = loadForkPreference(KEY);
+const storedOption = loadForkPreference(KEY) as SortOption | null;
+const storedOptions: SortOption[] = ["Title", "Author", "Progress", "Time Read", "Characters"];
 
 const romanValues: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100 };
 const romanPattern = /(?<=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々] ?)[IVXLC]+(?![A-Za-z])/gu;
@@ -38,7 +39,7 @@ export function titleKey(title: string) {
 }
 
 export const bookSort = $state<{ option: SortOption; reversed: boolean; customShelves: string[] }>({
-  option: storedOption === "Title" || storedOption === "Progress" || storedOption === "Time Read" ? storedOption : "Recent",
+  option: storedOption && storedOptions.includes(storedOption) ? storedOption : "Recent",
   reversed: loadForkPreference(REVERSED_KEY) === "true",
   customShelves: storedCustomShelves(),
 });
@@ -94,18 +95,31 @@ export function sortBooks(
     const rank = (book: BookMetadata) => position.get(book.folder) ?? order.length;
     return books.toSorted((a, b) => rank(a) - rank(b));
   }
-  const keys = option === "Title" ? new Map(books.map((book) => [book.id, titleKey(book.renamedTitle ?? book.title)])) : null;
+  const keys =
+    option === "Title" || option === "Author"
+      ? new Map(books.map((book) => [book.id, titleKey(book.renamedTitle ?? book.title)]))
+      : null;
+  const byTitle = (a: BookMetadata, b: BookMetadata) =>
+    keys!.get(a.id)!.localeCompare(keys!.get(b.id)!, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
   const sorted = books.toSorted((a, b) => {
     switch (option) {
       case "Title":
-        return keys!.get(a.id)!.localeCompare(keys!.get(b.id)!, undefined, {
-          numeric: true,
-          sensitivity: "base",
-        });
+        return byTitle(a, b);
+      case "Author":
+        return (
+          Number(!a.author) - Number(!b.author) ||
+          (a.author ?? "").localeCompare(b.author ?? "", undefined, { sensitivity: "base" }) ||
+          byTitle(a, b)
+        );
       case "Progress":
         return b.progress - a.progress;
       case "Time Read":
         return (readingTimes[b.id] ?? 0) - (readingTimes[a.id] ?? 0);
+      case "Characters":
+        return b.charactersTotal - a.charactersTotal;
       default:
         return b.lastAccess - a.lastAccess;
     }
@@ -115,7 +129,7 @@ export function sortBooks(
 
 function refreshBookSortFromForkFile() {
   const option = loadForkPreference(KEY);
-  bookSort.option = option === "Title" || option === "Progress" || option === "Time Read" ? option : "Recent";
+  bookSort.option = option && ["Title", "Author", "Progress", "Time Read", "Characters"].includes(option) ? option as SortOption : "Recent";
   bookSort.reversed = loadForkPreference(REVERSED_KEY) === "true";
   bookSort.customShelves = storedCustomShelves();
 }

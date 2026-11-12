@@ -97,11 +97,13 @@
       .map((shelf) => ({ name: shelf.name, count: shelfBooks(books, { kind: "shelf", name: shelf.name }).length }))
       .filter((shelf) => shelf.count > 0),
   );
+  const visibleShelves = $derived(bookShelves.filter((shelf) => !shellConfig.hiddenShelves.includes(shelf.name)));
   const unshelvedCount = $derived(shelfBooks(books, { kind: "unshelved" }).length);
   const completedCount = $derived(shellConfig.showCompleted ? shelfBooks(books, { kind: "completed" }).length : 0);
 
   $effect(() => {
     if (source.kind === "completed" && !shellConfig.showCompleted) source = { kind: "home" };
+    if (source.kind === "shelf" && shellConfig.hiddenShelves.includes(source.name)) source = { kind: "home" };
     const key = source.kind === "series" ? source.key : null;
     if (key === null) return;
     const group = bookSeries.find((entry) => entry.key === key);
@@ -252,6 +254,19 @@
     await menu.popup();
   }
 
+  async function showShelfMenu(name: string, e: MouseEvent) {
+    e.preventDefault();
+    const menu = await Menu.new({
+      items: [
+        { id: `rename-shelf-${name}`, text: "Rename", action: () => manageShelves?.openRename(name) },
+        { id: `hide-shelf-${name}`, text: "Hide", action: () => manageShelves?.setHidden(name, true) },
+        { item: "Separator" },
+        { id: `delete-shelf-${name}`, text: "Delete", action: () => manageShelves?.removeShelf(name) },
+      ],
+    });
+    await menu.popup();
+  }
+
   function saveSeriesName() {
     if (renameSeriesKey !== null) renameSeries(renameSeriesKey, renameSeriesText.trim());
     renameSeriesDialog?.close();
@@ -348,10 +363,15 @@
             {#if bookShelves.length > 0}
               {@render sourceRow({ kind: "unshelved" }, "Unshelved", unshelvedCount)}
             {/if}
-            {#if bookShelves.length > 0}
+            {#if visibleShelves.length > 0}
               <li class="menu-title text-[11px] font-medium uppercase tracking-wider">Shelves</li>
-              {#each bookShelves as shelf (shelf.name)}
-                {@render sourceRow({ kind: "shelf", name: shelf.name }, shelf.name, shelf.count)}
+              {#each visibleShelves as shelf (shelf.name)}
+                {@render sourceRow(
+                  { kind: "shelf", name: shelf.name },
+                  shelf.name,
+                  shelf.count,
+                  (e) => showShelfMenu(shelf.name, e),
+                )}
               {/each}
             {/if}
             {#if bookSeries.length > 0}

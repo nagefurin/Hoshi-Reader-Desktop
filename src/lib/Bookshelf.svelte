@@ -285,25 +285,27 @@
   }
 
   async function deleteSelected() {
-    if (!(await ask(`Delete ${selectedIds.length} book(s)?`, { kind: "warning", okLabel: "Delete", cancelLabel: "Cancel" }))) return;
-    for (const id of selectedIds) await onDelete(id);
-    clearSelection();
+    if (await deleteBooks(selectedBooks, `Delete ${selectedBooks.length} book(s)?`)) clearSelection();
   }
 
-  async function deleteBook(book: BookMetadata) {
-    const text = `Delete "${displayTitle(book)}"?`;
-    if (syncConfig.enableSync && book.epub && (await invoke<boolean>("gdrive_published_epub", { id: book.id }))) {
-      const result = await message(text, {
+  async function deleteBooks(books: BookMetadata[], text: string) {
+    const published = syncConfig.enableSync
+      ? await Promise.all(books.map((book) => !!book.epub && invoke<boolean>("gdrive_published_epub", { id: book.id })))
+      : [];
+    const local = books.filter((_, index) => published[index]);
+    let choice: string | null = null;
+    if (local.length > 0) {
+      choice = await message(text, {
         kind: "warning",
         buttons: { yes: "Delete Local", no: "Delete Everywhere", cancel: "Cancel" },
       });
-      if (result === "Delete Local") await onDeleteLocal(book.id);
-      if (result === "Delete Everywhere") await onDelete(book.id);
-      return;
+    } else if (await ask(text, { kind: "warning", okLabel: syncConfig.enableSync ? "Delete Everywhere" : "Delete", cancelLabel: "Cancel" })) {
+      choice = "Delete Everywhere";
     }
-    const okLabel = syncConfig.enableSync ? "Delete Everywhere" : "Delete";
-    if (!(await ask(text, { kind: "warning", okLabel, cancelLabel: "Cancel" }))) return;
-    await onDelete(book.id);
+    if (choice === "Delete Local") for (const book of local) await onDeleteLocal(book.id);
+    else if (choice === "Delete Everywhere") for (const book of books) await onDelete(book.id);
+    else return false;
+    return true;
   }
 
   let completionDialog = $state<HTMLDialogElement>();
@@ -333,7 +335,11 @@
     completionDay = dayKey(date ?? new Date());
     completionUnknown = completionEditing && date === null;
     completionRemove = false;
-    completionSize = book?.epub ? await invoke<number | null>("book_epub_size", { id: book.id }) : null;
+    const sizes = await Promise.all(
+      books.filter((book) => book.epub).map((book) => invoke<number | null>("book_epub_size", { id: book.id })),
+    );
+    const known = sizes.filter((size) => size !== null);
+    completionSize = known.length > 0 ? known.reduce((total, size) => total + size, 0) : null;
     completionDialog?.showModal();
   }
 
@@ -345,7 +351,7 @@
       for (const book of completionBooks) {
         if (completionEditing) await invoke("set_book_completed", { id: book.id, completed });
         else await invoke("mark_book_read", { id: book.id, completed });
-        if (completionRemove) await invoke("remove_book_epub", { id: book.id });
+        if (completionRemove && book.epub) await invoke("remove_book_epub", { id: book.id });
       }
     } catch (e) {
       toast?.show(String(e), "error");
@@ -463,9 +469,27 @@
       ...(shellConfig.showSeries
         ? [{ id: `series-${book.id}`, text: "Edit Series", action: () => openEditSeries(book) }]
         : []),
-      { id: `delete-${book.id}`, text: "Delete", action: () => deleteBook(book) },
+      { id: `delete-${book.id}`, text: "Delete", action: () => deleteBooks([book], `Delete "${displayTitle(book)}"?`) },
     ]);
   }
+
+  function charactersRead(book: BookMetadata) {
+    return isFinished(book) ? book.charactersTotal : book.charactersRead;
+  }
+
+  function characters(book: BookMetadata) {
+    return `${formatNumber(charactersRead(book))} / ${formatNumber(book.charactersTotal)}`;
+  }
+
+  const shelfCharacters = $derived(
+    books.reduce(
+      (sum, book) => ({
+        read: sum.read + charactersRead(book),
+        total: sum.total + book.charactersTotal,
+      }),
+      { read: 0, total: 0 },
+    ),
+  );
 
   function lastRead(book: BookMetadata) {
     const label = relativeDate(book.lastAccess);
@@ -479,16 +503,20 @@
   }}
 />
 
-{#snippet status(book: BookMetadata)}
-  <div class="flex items-center gap-1">
-    <progress
-      class="progress h-1 flex-1 text-base-content/60"
-      value={Math.min(book.progress, 1) * 100}
-      max="100"
-    ></progress>
-    <span class="w-10 shrink-0 text-right text-[11px] font-medium tabular-nums text-base-content/60">
-      {(book.progress * 100).toFixed(1)}%
-    </span>
+{#snippet status(book: BookMetadata, bar = true, percentage = true)}
+  <div class="flex h-4 items-center gap-1">
+    {#if bar}
+      <progress
+        class="progress h-1 flex-1 text-base-content/60"
+        value={Math.min(book.progress, 1) * 100}
+        max="100"
+      ></progress>
+    {/if}
+    {#if percentage}
+      <span class="{bar ? 'w-10 shrink-0 text-right' : ''} text-[11px] font-medium tabular-nums text-base-content/60">
+        {(book.progress * 100).toFixed(1)}%
+      </span>
+    {/if}
   </div>
 {/snippet}
 
@@ -516,17 +544,29 @@
         <CircleCheck class="absolute bottom-1.5 right-1.5 size-[22px] rounded-full bg-[#999] text-white" />
       {/if}
     </BookCover>
-    {#if source.kind !== "home"}
-      {@render status(book)}
+    {#if source.kind !== "home" && (shellConfig.bookshelfShowProgressBar || shellConfig.bookshelfShowPercentage || (shellConfig.bookshelfShowCharacters && book.charactersTotal > 0))}
+      <div class="mt-0.5 flex flex-col">
+        {#if shellConfig.bookshelfShowProgressBar || shellConfig.bookshelfShowPercentage}
+          {@render status(book, shellConfig.bookshelfShowProgressBar, shellConfig.bookshelfShowPercentage)}
+        {/if}
+        {#if shellConfig.bookshelfShowCharacters && book.charactersTotal > 0}
+          <span class="text-[11px] leading-4 tabular-nums text-base-content/60">{characters(book)}</span>
+        {/if}
+      </div>
     {/if}
-    <span class="{downloadingBooks[book.id] === undefined ? 'line-clamp-2' : 'line-clamp-1'} text-sm leading-snug transition-colors group-hover:text-secondary group-focus-visible:text-secondary">
-      {#if book.epubRemoved}
-        <Archive class="mb-0.5 inline size-3.5" />
-      {:else if !book.epub}
-        <Cloud class="mb-0.5 inline size-3.5" />
-      {/if}
-      {displayTitle(book)}
-    </span>
+    {#if source.kind === "home" || shellConfig.bookshelfShowTitle}
+      <span class="{downloadingBooks[book.id] === undefined ? 'line-clamp-2' : 'line-clamp-1'} text-sm leading-snug transition-colors group-hover:text-secondary group-focus-visible:text-secondary">
+        {#if book.epubRemoved}
+          <Archive class="mb-0.5 inline size-3.5" />
+        {:else if !book.epub}
+          <Cloud class="mb-0.5 inline size-3.5" />
+        {/if}
+        {displayTitle(book)}
+      </span>
+    {/if}
+    {#if source.kind !== "home" && shellConfig.bookshelfShowAuthor && book.author}
+      <span class="truncate text-xs text-base-content/60">{book.author}</span>
+    {/if}
     {#if downloadingBooks[book.id] !== undefined}
       <div class="flex items-center gap-1 px-0.5 text-base-content/60">
         <CircleArrowDown class="size-3.5 shrink-0" />
@@ -540,12 +580,18 @@
   </button>
 {/snippet}
 
+{#snippet characterTotal()}
+  <span>
+    {formatNumber(shelfCharacters.read)} / {formatNumber(shelfCharacters.total)}<span class="hidden @2xl:inline">{" "}characters</span>
+  </span>
+{/snippet}
+
 {#snippet sortHeader(label: string, value: SortOption, className = "")}
   <th class={className}>
     <button class="inline-flex items-center gap-1 hover:text-base-content {option === value ? 'text-base-content' : ''}" onclick={() => sortBy(value)}>
       {label}
       {#if option === value}
-        {#if (value === "Title") !== reversed}
+        {#if (value === "Title" || value === "Author") !== reversed}
           <ArrowUp class="size-3" />
         {:else}
           <ArrowDown class="size-3" />
@@ -598,8 +644,11 @@
     <td>
       {@render status(book)}
       {#if book.charactersTotal > 0}
-        <div class="text-[11px] tabular-nums text-base-content/60">{formatNumber(book.charactersRead)} / {formatNumber(book.charactersTotal)}</div>
+        <div class="text-[11px] tabular-nums text-base-content/60 @3xl:hidden">{characters(book)}</div>
       {/if}
+    </td>
+    <td class="hidden text-right text-xs tabular-nums text-base-content/60 @3xl:table-cell">
+      {book.charactersTotal > 0 ? characters(book) : "—"}
     </td>
     <td class="text-right text-xs tabular-nums text-base-content/60">
       {readingTimes[book.id] ? formatUnits(readingTimes[book.id]) : "—"}
@@ -608,11 +657,16 @@
   </tr>
 {/snippet}
 
-<div class="flex h-full flex-col bg-base-100">
+<div class="@container flex h-full flex-col bg-base-100">
   {#if source.kind === "home"}
     <Titlebar />
   {:else}
-    <PageHeader title={isSelecting ? `${selectedIds.length} Selected` : sourceTitle(source)}>
+    <PageHeader
+      title={isSelecting ? `${selectedIds.length} Selected` : sourceTitle(source)}
+      subtitle={!isSelecting && shelfCharacters.total > 0 && (shellConfig.bookshelfLayout === "List" || shellConfig.bookshelfShowCharacters)
+        ? characterTotal
+        : undefined}
+    >
       {#snippet actions()}
         {#if isSelecting}
           <button class="btn btn-ghost btn-sm" disabled={selectedIds.length === 0} onclick={() => popupMenu(moveItems(selectedIds))}>
@@ -635,7 +689,7 @@
           {/if}
           <button class="btn btn-neutral btn-sm" onclick={clearSelection}>Done</button>
         {:else}
-          <label class="input input-sm w-52">
+          <label class="input input-sm w-52 min-w-32">
             <Search class="size-4 text-base-content/50" />
             <input type="search" placeholder="Search" autocomplete="off" spellcheck="false" bind:value={query} />
           </label>
@@ -674,6 +728,7 @@
           <tr>
             {@render sortHeader("Title", "Title")}
             {@render sortHeader("Progress", "Progress", "w-1/4")}
+            {@render sortHeader("Characters", "Characters", "hidden w-40 text-right @3xl:table-cell")}
             {@render sortHeader("Time Read", "Time Read", "w-28 text-right")}
             {@render sortHeader("Last Read", "Recent", "w-36 text-right")}
           </tr>
@@ -815,7 +870,7 @@
 
       {#if completionSize !== null}
         <div class="flex flex-col gap-1">
-          <SettingToggle label="Delete EPUB" bind:checked={completionRemove} onchange={() => {}} />
+          <SettingToggle label={completionBooks.length === 1 ? "Delete EPUB" : "Delete EPUBs"} bind:checked={completionRemove} onchange={() => {}} />
           <span class="text-xs text-base-content/60">
             Frees {formatSize(completionSize)} on this device{syncConfig.enableSync ? " and on Google Drive" : ""}.
           </span>

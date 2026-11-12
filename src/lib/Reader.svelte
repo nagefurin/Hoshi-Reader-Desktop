@@ -1613,6 +1613,7 @@
       .filter(
         (binding) =>
           binding.key === "toggleTracking" ||
+          binding.key === "exitReader" ||
           (binding.key === "manualBookmark" && !continuous) ||
           (binding.section === "Sasayaki" && (sasayaki?.hasAudio || ttsSessionActive)) ||
           (binding.section === "Popup" && popups.length > 0),
@@ -1637,6 +1638,10 @@
     if (key === "F11") toggleFullscreen();
     else if (key === hotkeyConfig.toggleTracking) toggleTracking();
     else if (key === hotkeyConfig.manualBookmark) postToFrame({ hoshi: "bookmark-mode" });
+    else if (key === hotkeyConfig.exitReader) {
+      stats.stopTracking();
+      onClose();
+    }
     else if (key === hotkeyConfig.sasayakiPlayback) {
       if (ttsSessionActive && ttsControlApi) ttsControlApi.togglePlayback();
       else toggleSasayakiPlayback();
@@ -1868,15 +1873,10 @@
       openReaderPanel(null);
       return true;
     }
-    if (showBar) {
-      showBar = false;
-      return true;
-    }
-    if (fullscreen) {
-      toggleFullscreen();
-      return true;
-    }
-    return false;
+    if (!showBar) showBar = true;
+    else if (fullscreen) toggleFullscreen();
+    else showBar = false;
+    return true;
   }
 
   function onKey(e: KeyboardEvent) {
