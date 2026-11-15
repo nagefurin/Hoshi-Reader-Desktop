@@ -722,7 +722,7 @@
       No Results
     </div>
   {:else if shellConfig.bookshelfLayout === "List"}
-    <div class="flex-1 overflow-y-auto">
+    <div class="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
       <table class="table table-sm table-pin-rows table-fixed [&_:is(th,td):first-child]:ps-5 [&_:is(th,td):last-child]:pe-5">
         <thead>
           <tr>
