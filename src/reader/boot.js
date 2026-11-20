@@ -20,6 +20,7 @@
   const paragraphMode = params.get("pm") === "1";
   const maxSentencesPerPage = Number(params.get("spp"));
   const splitDialogue = params.get("sd") === "1";
+  let centerText = params.get("ct") === "1";
   const pagesRun = params.get("pages");
   const imageSecond = params.get("is2") === "1";
   const pairSrc = params.get("pair");
@@ -85,9 +86,10 @@
     const overlap = vertical && !chromium ? fontSize : 0;
     const spread = spreadGap > 0;
     const pages = spread ? 2 : 1;
-    const gap = spread ? `${spreadGap}px` : `${paddingX}vw`;
-    const side = spread ? `${spreadGap / 2}px` : `${paddingX / 2}vw`;
-    const pageWidth = spread ? `calc(50vw - ${spreadGap}px)` : `${100 - paddingX}vw`;
+    const sideWidth = spread ? spreadGap / 2 : Math.round((paddingX / 200) * window.innerWidth);
+    const gap = `${sideWidth * 2}px`;
+    const side = `${sideWidth}px`;
+    const pageWidth = spread ? `calc(50vw - ${gap})` : `calc(100vw - ${gap})`;
     const imgWidth = `calc(${pageWidth} - 1px)`;
     const half = `calc(50vw + ${side})`;
     const imgHeight = vertical
@@ -267,6 +269,7 @@
         margin-block-start: 0 !important;
         break-before: column !important;
         -webkit-column-break-before: always !important;
+        ${centerText ? "inline-size: fit-content !important; margin-inline: auto !important;" : ""}
       }
       p.hoshi-sentence { text-indent: 0 !important; }
       ::highlight(hoshi-animation) { color: transparent !important; }`
@@ -490,7 +493,7 @@
     if (r.pageWidth === lastPageWidth && r.pageHeight === lastPageHeight) return;
     lastPageWidth = r.pageWidth;
     lastPageHeight = r.pageHeight;
-    if (maxWidth || maxHeight) applyStyle();
+    applyStyle();
     layoutParagraphs();
     if (!restored) return;
     if (!resizeAnchor) resizeAnchor = nodeAtProgress(position);
@@ -520,6 +523,7 @@
     lineHeight = m.lh;
     charSpacing = m.cs;
     paraSpacing = m.ps;
+    centerText = m.ct;
     spreadGap = m.sp;
     applyStyle();
     syncPageSize();
